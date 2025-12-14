@@ -33,7 +33,10 @@ fmt:
 lint:
 	golangci-lint run
 
-
 .PHONY: test
 test:
 	go test -v ./...
+
+.PHONY: run
+run:
+	go run . --local
