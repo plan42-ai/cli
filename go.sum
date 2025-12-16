@@ -18,8 +18,8 @@ github.com/debugging-sucks/concurrency v1.0.4 h1:wPNqu9k+KkoPHH/aqkkzYbVJeyPIaPn
 github.com/debugging-sucks/concurrency v1.0.4/go.mod h1:+ZDUxMe+5ThV9Kyx8jr41cA7ng1UX2J4FP9lczqABOk=
 github.com/debugging-sucks/ecies v1.0.4 h1:W5As8TJOcFAHQk/QA/gD+fThpaoVMRvWiEuz6AYNTp0=
 github.com/debugging-sucks/ecies v1.0.4/go.mod h1:1fwJ0Jk3CorZPiGg8mLZ1VfPhl2PLQPDetyNTRExBvo=
-github.com/debugging-sucks/event-horizon-sdk-go v1.0.318 h1:Za2bZz1AV3wpa5IHVBShX7hi6CWvYgyzxK7hPjll6zU=
-github.com/debugging-sucks/event-horizon-sdk-go v1.0.318/go.mod h1:Q0ejKvTUGXo/Cmu4VLI2IItX8oLGq1ddBXctGIV9vYg=
+github.com/debugging-sucks/event-horizon-sdk-go v1.0.322 h1:fNntY1546/iAW0YotunOHvvW2jcMgurHObSEhF+htdg=
+github.com/debugging-sucks/event-horizon-sdk-go v1.0.322/go.mod h1:Q0ejKvTUGXo/Cmu4VLI2IItX8oLGq1ddBXctGIV9vYg=
 github.com/debugging-sucks/openid v1.0.8 h1:5DZpdCw7t6KL9ajcgZY2jlY5HH437Cg1NdK3n8bAKO0=
 github.com/debugging-sucks/openid v1.0.8/go.mod h1:cWmDcK9sILNNlGv9x+2e4ZRteyIVgtpPZgJ75HYeBPM=
 github.com/debugging-sucks/sigv4util v1.0.5 h1:ngrp2XYwGSx8r8cfGnQezprDpRjfOi2CkAUmEpNxCbk=
@@ -36,5 +36,7 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 golang.org/x/exp v0.0.0-20251209150349-8475f28825e9 h1:MDfG8Cvcqlt9XXrmEiD4epKn7VJHZO84hejP9Jmp0MM=
 golang.org/x/exp v0.0.0-20251209150349-8475f28825e9/go.mod h1:EPRbTFwzwjXj9NpYyyrvenVh9Y+GFeEvMNh7Xuz7xgU=
+gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405 h1:yhCVgyC4o1eVCa2tZl7eS0r+SDo693bJlVdllGtEeKM=
+gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
 gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=

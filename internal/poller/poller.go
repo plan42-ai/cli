@@ -401,17 +401,23 @@ func parseMessage(data []byte) (pollerMessage, error) {
 	var tmp struct {
 		Type messages.MessageType `json:"type"`
 	}
+
 	err := json.Unmarshal(data, &tmp)
 	if err != nil {
 		return nil, err
 	}
+
 	var target pollerMessage
+
 	switch tmp.Type {
 	case messages.PingRequestMessage:
 		target = &pollerPingRequest{}
+	case messages.InvokeAgentRequestMessage:
+		target = &pollerInvokeAgentRequest{}
 	default:
 		return nil, fmt.Errorf("unknown message type: %v", tmp.Type)
 	}
+
 	err = json.Unmarshal(data, target)
 	if err != nil {
 		return nil, err
