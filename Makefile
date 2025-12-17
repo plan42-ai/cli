@@ -31,7 +31,8 @@ fmt:
 
 .PHONY: lint
 lint:
-	golangci-lint run
+	GOOS=linux golangci-lint run
+	GOOS=darwin golangci-lint run
 
 .PHONY: test
 test:
