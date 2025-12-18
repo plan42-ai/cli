@@ -6,7 +6,7 @@ require (
 	github.com/alecthomas/kong v1.13.0
 	github.com/debugging-sucks/concurrency v1.0.4
 	github.com/debugging-sucks/ecies v1.0.4
-	github.com/debugging-sucks/event-horizon-sdk-go v1.0.322
+	github.com/debugging-sucks/event-horizon-sdk-go v1.0.324
 	github.com/debugging-sucks/openid v1.0.8
 	github.com/google/uuid v1.6.0
 	github.com/stretchr/testify v1.11.1

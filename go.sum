@@ -20,6 +20,8 @@ github.com/debugging-sucks/ecies v1.0.4 h1:W5As8TJOcFAHQk/QA/gD+fThpaoVMRvWiEuz6
 github.com/debugging-sucks/ecies v1.0.4/go.mod h1:1fwJ0Jk3CorZPiGg8mLZ1VfPhl2PLQPDetyNTRExBvo=
 github.com/debugging-sucks/event-horizon-sdk-go v1.0.322 h1:fNntY1546/iAW0YotunOHvvW2jcMgurHObSEhF+htdg=
 github.com/debugging-sucks/event-horizon-sdk-go v1.0.322/go.mod h1:Q0ejKvTUGXo/Cmu4VLI2IItX8oLGq1ddBXctGIV9vYg=
+github.com/debugging-sucks/event-horizon-sdk-go v1.0.324 h1:mGgeoCC2Ek06g6+cBMkLducubNsQGOEarlVQHUij5XM=
+github.com/debugging-sucks/event-horizon-sdk-go v1.0.324/go.mod h1:Q0ejKvTUGXo/Cmu4VLI2IItX8oLGq1ddBXctGIV9vYg=
 github.com/debugging-sucks/openid v1.0.8 h1:5DZpdCw7t6KL9ajcgZY2jlY5HH437Cg1NdK3n8bAKO0=
 github.com/debugging-sucks/openid v1.0.8/go.mod h1:cWmDcK9sILNNlGv9x+2e4ZRteyIVgtpPZgJ75HYeBPM=
 github.com/debugging-sucks/sigv4util v1.0.5 h1:ngrp2XYwGSx8r8cfGnQezprDpRjfOi2CkAUmEpNxCbk=

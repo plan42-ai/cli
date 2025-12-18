@@ -399,7 +399,7 @@ func (p *Poller) processMessage(msg *eh.RunnerMessage, qi *queueInfo) {
 
 func parseMessage(data []byte) (pollerMessage, error) {
 	var tmp struct {
-		Type messages.MessageType `json:"type"`
+		Type messages.MessageType
 	}
 
 	err := json.Unmarshal(data, &tmp)
