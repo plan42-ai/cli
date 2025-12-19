@@ -154,6 +154,7 @@ func (p *pollerInvokeAgentRequest) createContainer(ctx context.Context, path str
 		"--rm",
 		p.Environment.DockerImage,
 		"--input-socket", "/tmp/agent.sock",
+		"--plan42-proxy",
 	)
 	cmdOutput, err := cmd.CombinedOutput()
 	if err != nil {
