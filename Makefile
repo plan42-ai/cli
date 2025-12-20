@@ -18,7 +18,7 @@ VERSION = "$(PROJECT_MAJOR_VERSION).$(PROJECT_MINOR_VERSION).$(PROJECT_PATCH_VER
 
 .PHONY: build
 build:
-	go build ./...
+	go build .
 
 .PHONY: tag
 tag:

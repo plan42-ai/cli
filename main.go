@@ -96,7 +96,7 @@ func main() {
 }
 
 func setupLogging() {
-	handler := log.NewContextHandler(slog.NewJSONHandler(os.Stdout, nil))
+	handler := log.NewContextHandler(slog.NewTextHandler(os.Stdout, nil))
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
 }
