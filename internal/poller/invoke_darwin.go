@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
 	"os/exec"
 
 	"github.com/debugging-sucks/event-horizon-sdk-go/eh/messages"
@@ -16,28 +15,6 @@ import (
 	"github.com/debugging-sucks/runner/internal/util"
 	"github.com/google/uuid"
 )
-
-func (p *pollerInvokeAgentRequest) handler(done chan struct{}) http.Handler {
-	return http.HandlerFunc(
-		func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodGet {
-				w.WriteHeader(http.StatusMethodNotAllowed)
-				return
-			}
-
-			if r.URL.Path != "/" {
-				w.WriteHeader(http.StatusNotFound)
-				return
-			}
-
-			defer close(done)
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusOK)
-			enc := json.NewEncoder(w)
-			_ = enc.Encode(p)
-		},
-	)
-}
 
 func (p *pollerInvokeAgentRequest) validateTaskID() error {
 	_, err := uuid.Parse(p.Turn.TaskID)
@@ -78,7 +55,7 @@ func (p *pollerInvokeAgentRequest) Process(ctx context.Context) messages.Message
 func (p *pollerInvokeAgentRequest) runContainer(ctx context.Context, containerID string) {
 	jsonBytes, err := json.Marshal(p)
 	if err != nil {
-		slog.ErrorContext(ctx, "failed to marshal json: %v", err)
+		slog.ErrorContext(ctx, "failed to marshal json: %v", "error", err)
 		return
 	}
 
@@ -113,24 +90,6 @@ func (p *pollerInvokeAgentRequest) runContainer(ctx context.Context, containerID
 		slog.ErrorContext(ctx, "container run failed", "error", err)
 		return
 	}
-}
-
-func (p *pollerInvokeAgentRequest) startContainer(ctx context.Context, containerID string) error {
-	// #nosec: G204: Subprocess launched with a potential tainted input or cmd arguments.
-	//    This is ok. The containerID is equal to "plan42/<task_id>/<turn_index>". See the comments in createContainer
-	//    for more details on why this is safe.
-	cmd := exec.CommandContext(
-		ctx,
-		"container",
-		"start",
-		containerID,
-	)
-	cmdOutput, err := cmd.CombinedOutput()
-	if err != nil {
-		slog.ErrorContext(ctx, "unable to start container", "error", err, "output", string(cmdOutput))
-		return fmt.Errorf("failed to start agent container: %v: %v", err, string(cmdOutput))
-	}
-	return nil
 }
 
 func (p *pollerInvokeAgentRequest) validateDockerImage() error {

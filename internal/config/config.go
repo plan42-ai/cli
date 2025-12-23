@@ -1,0 +1,18 @@
+package config
+
+type Runner struct {
+	URL         string `toml:"URL"`
+	RunnerToken string `toml:"token"`
+}
+
+type GithubInfo struct {
+	Name         string `toml:"name"`
+	URL          string `toml:"url"`
+	ConnectionID string `toml:"connection_id"`
+	Token        string `toml:"token"`
+}
+
+type Config struct {
+	Runner Runner                 `toml:"runner"`
+	Github map[string]*GithubInfo `toml:"github"`
+}
