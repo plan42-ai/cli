@@ -14,51 +14,59 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/debugging-sucks/event-horizon-sdk-go/eh"
 	"github.com/debugging-sucks/openid/jwt"
+	"github.com/debugging-sucks/runner/internal/config"
 	"github.com/debugging-sucks/runner/internal/log"
 	"github.com/debugging-sucks/runner/internal/poller"
 	"github.com/debugging-sucks/runner/internal/util"
+	"github.com/pelletier/go-toml/v2"
 )
 
 type Options struct {
-	Ctx      context.Context `kong:"-"`
-	Client   *eh.Client      `kong:"-"`
-	APIToken string          `help:"API token" short:"t" required:"true" env:"PLAN42_API_TOKEN"`
-	Endpoint string          `help:"Set to override the Plan42 api endpoint." optional:""`
-	Dev      bool            `help:"Point at the dev api endpoint (api.dev.plan42.ai)." optional:""`
-	Insecure bool            `help:"Don't validate the api cert." optional:""`
-	Local    bool            `help:"Short for --endpoint localhost:7443 --insecure"`
+	Ctx        context.Context `kong:"-"`
+	Client     *eh.Client      `kong:"-"`
+	Config     config.Config   `kong:"-"`
+	ConfigFile string          `help:"Path to config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
 }
 
 func (o *Options) process() error {
-	if o.Dev && o.Local {
-		return errors.New("cannot use both --dev and --local options together")
+	var err error
+	if o.ConfigFile == "" {
+		o.ConfigFile, err = util.DefaultRunnerConfigFileName()
+		if err != nil {
+			return fmt.Errorf("failed to determine default config file path: %w", err)
+		}
 	}
 
-	if o.Local && o.Endpoint == "" {
-		o.Endpoint = "https://localhost:7443"
+	f, err := os.Open(o.ConfigFile)
+	if err != nil {
+		return fmt.Errorf("failed to open config file: %w", err)
+	}
+	defer util.Close(f)
+
+	decoder := toml.NewDecoder(f)
+	err = decoder.Decode(&o.Config)
+	if err != nil {
+		return fmt.Errorf("failed to parse config file: %w", err)
 	}
 
-	if o.Dev && o.Endpoint == "" {
-		o.Endpoint = "https://api.dev.plan42.ai"
+	if o.Config.Runner.RunnerToken == "" {
+		return errors.New("runner token not specified")
 	}
 
-	if o.Endpoint == "" {
-		o.Endpoint = "https://api.plan42.ai"
+	if o.Config.Runner.URL == "" {
+		return errors.New("endpoint URL not specified")
 	}
 
-	if o.Local {
-		o.Insecure = true
+	clientOptions := []eh.Option{
+		eh.WithAPIToken(o.Config.Runner.RunnerToken),
 	}
 
-	var options []eh.Option
-	if o.Insecure {
-		options = append(options, eh.WithInsecureSkipVerify())
+	if o.Config.Runner.URL == "https://localhost:7443" {
+		clientOptions = append(clientOptions, eh.WithInsecureSkipVerify())
 	}
 
 	o.Ctx = context.Background()
-
-	options = append(options, eh.WithAPIToken(o.APIToken))
-	o.Client = eh.NewClient(o.Endpoint, options...)
+	o.Client = eh.NewClient(o.Config.Runner.URL, clientOptions...)
 
 	return nil
 }
@@ -73,7 +81,7 @@ func main() {
 		slog.Error("error processing options", "error", err)
 		panic(util.ExitCode(1))
 	}
-	tokenID, runnerID, err := extractParamsFromToken(options.APIToken)
+	tokenID, runnerID, err := extractParamsFromToken(options.Config.Runner.RunnerToken)
 	if err != nil {
 		slog.Error("error extracting params from token", "error", err)
 		panic(util.ExitCode(2))
