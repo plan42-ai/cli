@@ -4,6 +4,7 @@ package util
 import (
 	"io"
 	"os"
+	"path"
 )
 
 func Pointer[T any](v T) *T {
@@ -32,4 +33,12 @@ func Deref[T any](p *T) T {
 		return zero
 	}
 	return *p
+}
+
+func DefaultRunnerConfigFileName() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return path.Join(home, ".config", "plan42-runner.toml"), nil
 }

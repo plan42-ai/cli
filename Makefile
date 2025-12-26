@@ -18,7 +18,7 @@ VERSION = "$(PROJECT_MAJOR_VERSION).$(PROJECT_MINOR_VERSION).$(PROJECT_PATCH_VER
 
 .PHONY: build
 build:
-	go build .
+	go build ./...
 
 .PHONY: tag
 tag:
@@ -40,4 +40,4 @@ test:
 
 .PHONY: run
 run:
-	go run . --local
+	go run ./cmd/plan42-runner

@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -339,7 +338,7 @@ func (m *model) save() tea.Msg {
 		return fmt.Errorf("unable to serialize config file: %w", err)
 	}
 
-	fileName, err := configFileName()
+	fileName, err := util.DefaultRunnerConfigFileName()
 	if err != nil {
 		return fmt.Errorf("unable to compute config file path: %w", err)
 	}
@@ -542,14 +541,6 @@ func (m *model) onUp(cmds []tea.Cmd) []tea.Cmd {
 	return cmds
 }
 
-func configFileName() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return path.Join(home, ".config", "plan42-runner.toml"), nil
-}
-
 func main() {
 	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
 	_, err := p.Run()
@@ -573,7 +564,7 @@ func initialModel() tea.Model {
 	ret.cfg.Runner.URL = "https://api.dev.plan42.ai"
 	ret.severURL.SetValue(ret.cfg.Runner.URL)
 
-	fileName, err := configFileName()
+	fileName, err := util.DefaultRunnerConfigFileName()
 	if err != nil {
 		return ret
 	}
