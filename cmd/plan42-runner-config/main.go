@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/alecthomas/kong"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -86,6 +87,7 @@ type model struct {
 	cfg                  config.Config
 	validateErr          error
 	saveErr              error
+	options              *Options
 }
 
 func (m model) Init() tea.Cmd {
@@ -338,12 +340,7 @@ func (m *model) save() tea.Msg {
 		return fmt.Errorf("unable to serialize config file: %w", err)
 	}
 
-	fileName, err := util.DefaultRunnerConfigFileName()
-	if err != nil {
-		return fmt.Errorf("unable to compute config file path: %w", err)
-	}
-
-	err = renameio.WriteFile(fileName, fileData, os.FileMode(0600))
+	err = renameio.WriteFile(m.options.ConfigFile, fileData, os.FileMode(0600))
 	if err != nil {
 		return fmt.Errorf("unable to save config file: %w", err)
 	}
@@ -541,16 +538,40 @@ func (m *model) onUp(cmds []tea.Cmd) []tea.Cmd {
 	return cmds
 }
 
+type Options struct {
+	ConfigFile string `help:"Path to config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
+}
+
+func (o *Options) Process() error {
+	var err error
+	if o.ConfigFile == "" {
+		o.ConfigFile, err = util.DefaultRunnerConfigFileName()
+		if err != nil {
+			return fmt.Errorf("failed to determine default config file path: %w", err)
+		}
+	}
+	return nil
+}
+
 func main() {
-	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
-	_, err := p.Run()
+	defer util.HandleExit()
+	var options Options
+	kong.Parse(&options)
+	err := options.Process()
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "ERROR: %s\n", err)
-		os.Exit(1)
+		panic(util.ExitCode(1))
+	}
+
+	p := tea.NewProgram(initialModel(&options), tea.WithAltScreen())
+	_, err = p.Run()
+	if err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "ERROR: %s\n", err)
+		panic(util.ExitCode(2))
 	}
 }
 
-func initialModel() tea.Model {
+func initialModel(options *Options) tea.Model {
 	ret := &model{
 		selectedSection:      runnerSection,
 		selectedSectionIndex: 0,
@@ -558,17 +579,14 @@ func initialModel() tea.Model {
 		runnerToken:          textinput.New(),
 		severURL:             textinput.New(),
 		spinner:              spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(spinnerStyle)),
+		options:              options,
 	}
 	ret.runnerToken.Focus()
 	ret.runnerToken.Placeholder = "p42_01234abcdef..."
 	ret.cfg.Runner.URL = "https://api.dev.plan42.ai"
 	ret.severURL.SetValue(ret.cfg.Runner.URL)
 
-	fileName, err := util.DefaultRunnerConfigFileName()
-	if err != nil {
-		return ret
-	}
-	f, err := os.Open(fileName)
+	f, err := os.Open(options.ConfigFile)
 	if err != nil {
 		return ret
 	}
