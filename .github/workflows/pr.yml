@@ -5,11 +5,13 @@ on:
     branches: [ "main", "hack" ]
 
 jobs:
-
   build:
     permissions:
-      contents: read  # This is required for actions/checkout
-    runs-on: ubuntu-latest
+      contents: read
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, ubuntu-arm64, macos-26, macos-15-intel ]
+    runs-on: ${{ matrix.os}}
     steps:
     - uses: actions/checkout@v4
 
