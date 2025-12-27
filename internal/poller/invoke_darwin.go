@@ -9,11 +9,11 @@ import (
 	"log/slog"
 	"os/exec"
 
-	"github.com/debugging-sucks/event-horizon-sdk-go/eh/messages"
-	"github.com/debugging-sucks/runner/internal/docker"
-	"github.com/debugging-sucks/runner/internal/log"
-	"github.com/debugging-sucks/runner/internal/util"
 	"github.com/google/uuid"
+	"github.com/plan42-ai/plan42-cli/internal/docker"
+	"github.com/plan42-ai/plan42-cli/internal/log"
+	"github.com/plan42-ai/plan42-cli/internal/util"
+	"github.com/plan42-ai/sdk-go/p42/messages"
 )
 
 func (p *pollerInvokeAgentRequest) validateTaskID() error {

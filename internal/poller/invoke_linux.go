@@ -3,8 +3,8 @@ package poller
 import (
 	"context"
 
-	"github.com/debugging-sucks/event-horizon-sdk-go/eh/messages"
-	"github.com/debugging-sucks/runner/internal/util"
+	"github.com/plan42-ai/plan42-cli/internal/util"
+	"github.com/plan42-ai/sdk-go/p42/messages"
 )
 
 func (p *pollerInvokeAgentRequest) Process(_ context.Context) messages.Message {

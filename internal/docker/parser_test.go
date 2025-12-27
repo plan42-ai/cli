@@ -3,8 +3,8 @@ package docker_test
 import (
 	"testing"
 
-	"github.com/debugging-sucks/runner/internal/docker"
-	"github.com/debugging-sucks/runner/internal/util"
+	"github.com/plan42-ai/plan42-cli/internal/docker"
+	"github.com/plan42-ai/plan42-cli/internal/util"
 	"github.com/stretchr/testify/require"
 )
 

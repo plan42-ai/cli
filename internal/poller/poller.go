@@ -12,13 +12,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/debugging-sucks/concurrency"
-	"github.com/debugging-sucks/ecies"
-	"github.com/debugging-sucks/event-horizon-sdk-go/eh"
-	"github.com/debugging-sucks/event-horizon-sdk-go/eh/messages"
-	"github.com/debugging-sucks/runner/internal/log"
-	"github.com/debugging-sucks/runner/internal/util"
 	"github.com/google/uuid"
+	"github.com/plan42-ai/concurrency"
+	"github.com/plan42-ai/ecies"
+	"github.com/plan42-ai/plan42-cli/internal/log"
+	"github.com/plan42-ai/plan42-cli/internal/util"
+	"github.com/plan42-ai/sdk-go/p42"
+	"github.com/plan42-ai/sdk-go/p42/messages"
 )
 
 const maxRetries = 5
@@ -46,7 +46,7 @@ type Poller struct {
 	scaleCtx               context.Context
 	cancelScale            context.CancelFunc
 	mux                    sync.Mutex
-	client                 *eh.Client
+	client                 *p42.Client
 	tenantID               string
 	runnerID               string
 	queueManagementBackoff *concurrency.Backoff
@@ -208,7 +208,7 @@ func (p *Poller) poll(qi *queueInfo) {
 	}
 	defer p.deleteQueue(qi)
 
-	req := eh.GetMessagesBatchRequest{
+	req := p42.GetMessagesBatchRequest{
 		TenantID: p.tenantID,
 		RunnerID: p.runnerID,
 		QueueID:  qi.queueID,
@@ -242,7 +242,7 @@ loop:
 	}
 }
 
-func (p *Poller) doPoll(qi *queueInfo, req *eh.GetMessagesBatchRequest) int {
+func (p *Poller) doPoll(qi *queueInfo, req *p42.GetMessagesBatchRequest) int {
 	err := p.batchBackoff.WaitContext(qi.ctx)
 	if err != nil {
 		return 0
@@ -312,7 +312,7 @@ func (p *Poller) createQueue(qi *queueInfo) error {
 
 		_, err = p.client.RegisterRunnerQueue(
 			qi.ctx,
-			&eh.RegisterRunnerQueueRequest{
+			&p42.RegisterRunnerQueueRequest{
 				TenantID:  p.tenantID,
 				RunnerID:  p.runnerID,
 				QueueID:   qi.queueID,
@@ -320,7 +320,7 @@ func (p *Poller) createQueue(qi *queueInfo) error {
 			},
 		)
 
-		var conflictErr *eh.ConflictError
+		var conflictErr *p42.ConflictError
 		if errors.As(err, &conflictErr) {
 			// if we get a conflict error, the queue already exists. return
 			return nil
@@ -344,7 +344,7 @@ func (p *Poller) addStats(pct float64) {
 	p.nBatches++
 }
 
-func (p *Poller) processMessage(msg *eh.RunnerMessage, qi *queueInfo) {
+func (p *Poller) processMessage(msg *p42.RunnerMessage, qi *queueInfo) {
 	defer p.cg.Done()
 	ctx := log.WithContextAttrs(
 		qi.ctx,
@@ -382,7 +382,7 @@ func (p *Poller) processMessage(msg *eh.RunnerMessage, qi *queueInfo) {
 
 	err = p.client.WriteResponse(
 		qi.ctx,
-		&eh.WriteResponseRequest{
+		&p42.WriteResponseRequest{
 			TenantID:  p.tenantID,
 			RunnerID:  p.runnerID,
 			QueueID:   qi.queueID,
@@ -442,7 +442,7 @@ func (p *Poller) Close() error {
 }
 
 func (p *Poller) deleteQueue(qi *queueInfo) {
-	var queue *eh.RunnerQueue
+	var queue *p42.RunnerQueue
 	var err error
 
 	for i := 0; i < maxRetries; i++ {
@@ -455,7 +455,7 @@ func (p *Poller) deleteQueue(qi *queueInfo) {
 		if queue == nil {
 			queue, err = p.client.GetRunnerQueue(
 				qi.ctx,
-				&eh.GetRunnerQueueRequest{
+				&p42.GetRunnerQueueRequest{
 					TenantID: p.tenantID,
 					RunnerID: p.runnerID,
 					QueueID:  qi.queueID,
@@ -471,7 +471,7 @@ func (p *Poller) deleteQueue(qi *queueInfo) {
 
 		err = p.client.DeleteRunnerQueue(
 			qi.ctx,
-			&eh.DeleteRunnerQueueRequest{
+			&p42.DeleteRunnerQueueRequest{
 				TenantID: p.tenantID,
 				RunnerID: p.runnerID,
 				QueueID:  qi.queueID,
@@ -479,9 +479,9 @@ func (p *Poller) deleteQueue(qi *queueInfo) {
 			},
 		)
 
-		var conflictErr *eh.ConflictError
+		var conflictErr *p42.ConflictError
 		if errors.As(err, &conflictErr) {
-			queue, _ = conflictErr.Current.(*eh.RunnerQueue)
+			queue, _ = conflictErr.Current.(*p42.RunnerQueue)
 		}
 
 		if err != nil {
@@ -497,7 +497,7 @@ func (p *Poller) deleteQueue(qi *queueInfo) {
 }
 
 func (p *Poller) markAsDraining(qi *queueInfo) {
-	var queue *eh.RunnerQueue
+	var queue *p42.RunnerQueue
 	var err error
 
 	for i := 0; i < maxRetries; i++ {
@@ -510,7 +510,7 @@ func (p *Poller) markAsDraining(qi *queueInfo) {
 		if queue == nil {
 			queue, err = p.client.GetRunnerQueue(
 				qi.ctx,
-				&eh.GetRunnerQueueRequest{
+				&p42.GetRunnerQueueRequest{
 					TenantID: p.tenantID,
 					RunnerID: p.runnerID,
 					QueueID:  qi.queueID,
@@ -526,7 +526,7 @@ func (p *Poller) markAsDraining(qi *queueInfo) {
 
 		_, err = p.client.UpdateRunnerQueue(
 			qi.ctx,
-			&eh.UpdateRunnerQueueRequest{
+			&p42.UpdateRunnerQueueRequest{
 				TenantID:  p.tenantID,
 				RunnerID:  p.runnerID,
 				QueueID:   qi.queueID,
@@ -536,9 +536,9 @@ func (p *Poller) markAsDraining(qi *queueInfo) {
 			},
 		)
 
-		var conflictErr *eh.ConflictError
+		var conflictErr *p42.ConflictError
 		if errors.As(err, &conflictErr) {
-			queue, _ = conflictErr.Current.(*eh.RunnerQueue)
+			queue, _ = conflictErr.Current.(*p42.RunnerQueue)
 		}
 
 		if err != nil {
@@ -560,7 +560,7 @@ func (p *Poller) signalDrain(qi *queueInfo) {
 	}
 }
 
-func New(client *eh.Client, tenantID string, runnerID string) *Poller {
+func New(client *p42.Client, tenantID string, runnerID string) *Poller {
 	cg := concurrency.NewContextGroup()
 	ctx := log.WithContextAttrs(
 		cg.Context(),

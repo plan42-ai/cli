@@ -13,12 +13,12 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/debugging-sucks/event-horizon-sdk-go/eh"
-	"github.com/debugging-sucks/openid/jwt"
-	"github.com/debugging-sucks/runner/internal/config"
-	"github.com/debugging-sucks/runner/internal/util"
 	"github.com/google/renameio/v2"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/plan42-ai/openid/jwt"
+	"github.com/plan42-ai/plan42-cli/internal/config"
+	"github.com/plan42-ai/plan42-cli/internal/util"
+	"github.com/plan42-ai/sdk-go/p42"
 )
 
 const (
@@ -254,8 +254,8 @@ func (m model) validateToken() tea.Msg {
 		return err
 	}
 
-	options := []eh.Option{
-		eh.WithAPIToken(m.cfg.Runner.RunnerToken),
+	options := []p42.Option{
+		p42.WithAPIToken(m.cfg.Runner.RunnerToken),
 	}
 
 	parsedURL, err := url.Parse(m.cfg.Runner.URL)
@@ -264,19 +264,19 @@ func (m model) validateToken() tea.Msg {
 	}
 
 	if parsedURL.Host == "localhost:7443" {
-		options = append(options, eh.WithInsecureSkipVerify())
+		options = append(options, p42.WithInsecureSkipVerify())
 	}
 
-	client := eh.NewClient(m.cfg.Runner.URL, options...)
+	client := p42.NewClient(m.cfg.Runner.URL, options...)
 
-	req := &eh.ListGithubConnectionsRequest{
+	req := &p42.ListGithubConnectionsRequest{
 		TenantID: token.Payload.Subject,
 		Private:  util.Pointer(true),
 	}
 
 	for {
 		resp, err := client.ListGithubConnections(context.Background(), req)
-		var ehErr *eh.Error
+		var ehErr *p42.Error
 		if errors.As(err, &ehErr) {
 			if ehErr.ResponseCode == http.StatusForbidden {
 				return errors.New("token not authorized")
@@ -313,7 +313,7 @@ func indexByID(cfg map[string]*config.GithubInfo) map[string]*config.GithubInfo 
 }
 
 func processConnection(
-	conn *eh.GithubConnection,
+	conn *p42.GithubConnection,
 	idIdx map[string]*config.GithubInfo,
 ) (*config.GithubInfo, githubConnectionModel) {
 	existing := idIdx[conn.ConnectionID]

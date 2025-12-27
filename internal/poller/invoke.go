@@ -1,7 +1,7 @@
 package poller
 
 import (
-	"github.com/debugging-sucks/event-horizon-sdk-go/eh/messages"
+	"github.com/plan42-ai/sdk-go/p42/messages"
 )
 
 type pollerInvokeAgentRequest struct {

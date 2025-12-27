@@ -12,18 +12,18 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
-	"github.com/debugging-sucks/event-horizon-sdk-go/eh"
-	"github.com/debugging-sucks/openid/jwt"
-	"github.com/debugging-sucks/runner/internal/config"
-	"github.com/debugging-sucks/runner/internal/log"
-	"github.com/debugging-sucks/runner/internal/poller"
-	"github.com/debugging-sucks/runner/internal/util"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/plan42-ai/openid/jwt"
+	"github.com/plan42-ai/plan42-cli/internal/config"
+	"github.com/plan42-ai/plan42-cli/internal/log"
+	"github.com/plan42-ai/plan42-cli/internal/poller"
+	"github.com/plan42-ai/plan42-cli/internal/util"
+	"github.com/plan42-ai/sdk-go/p42"
 )
 
 type Options struct {
 	Ctx        context.Context `kong:"-"`
-	Client     *eh.Client      `kong:"-"`
+	Client     *p42.Client     `kong:"-"`
 	Config     config.Config   `kong:"-"`
 	ConfigFile string          `help:"Path to config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
 }
@@ -57,16 +57,16 @@ func (o *Options) process() error {
 		return errors.New("endpoint URL not specified")
 	}
 
-	clientOptions := []eh.Option{
-		eh.WithAPIToken(o.Config.Runner.RunnerToken),
+	clientOptions := []p42.Option{
+		p42.WithAPIToken(o.Config.Runner.RunnerToken),
 	}
 
 	if o.Config.Runner.URL == "https://localhost:7443" {
-		clientOptions = append(clientOptions, eh.WithInsecureSkipVerify())
+		clientOptions = append(clientOptions, p42.WithInsecureSkipVerify())
 	}
 
 	o.Ctx = context.Background()
-	o.Client = eh.NewClient(o.Config.Runner.URL, clientOptions...)
+	o.Client = p42.NewClient(o.Config.Runner.URL, clientOptions...)
 
 	return nil
 }
