@@ -20,12 +20,13 @@ jobs:
       with:
         go-version: '1.25.5'
 
+    - name: install deps
+      run: |
+        sudo gem install fpm -f
+
     - name: Configure Git to use GITHUB_TOKEN
       run: |
         git config --global url."https://${{ secrets.PRIVATE_REPO_PULL_TOKEN }}@github.com/".insteadOf "https://github.com/"
-
-    - name: Build
-      run: make build
 
     - name: golangci-lint
       uses: golangci/golangci-lint-action@v7
@@ -35,6 +36,16 @@ jobs:
     - name: Test
       run: make test
 
+    - name: Build / Package
+      run: make package
+
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-${{ matrix.os }}
+        path: dist/*
+        if-no-files-found: error
+
   release:
     needs: [build]
     runs-on: ubuntu-latest
@@ -42,5 +53,15 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: tag
-        run: make tag
+      - name: Download Build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Generate Version
+        id: ghversion
+        run: make gh-version
+      - name: Release
+        uses: softprops/action-gh-release@v2.0.8
+        with:
+          files: "dist/**"
+          tag_name: "v${{steps.ghversion.outputs.version}}"
