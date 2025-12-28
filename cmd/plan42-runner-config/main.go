@@ -16,9 +16,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/google/renameio/v2"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/plan42-ai/cli/internal/config"
+	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/openid/jwt"
-	"github.com/plan42-ai/plan42-cli/internal/config"
-	"github.com/plan42-ai/plan42-cli/internal/util"
 	"github.com/plan42-ai/sdk-go/p42"
 )
 
@@ -189,10 +189,14 @@ func (m model) View() string {
 	}
 
 	for i := range m.githubConnections {
-		b.WriteString(m.getSectionStyle(connectionsSection, i).Render(fmt.Sprintf(
-			"[github.%v]",
-			m.githubConnections[i].name.Value(),
-		)))
+		b.WriteString(
+			m.getSectionStyle(connectionsSection, i).Render(
+				fmt.Sprintf(
+					"[github.%v]",
+					m.githubConnections[i].name.Value(),
+				),
+			),
+		)
 		b.WriteRune('\n')
 
 		b.WriteString(fieldLabelStyle.Render("Name"))

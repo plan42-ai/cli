@@ -3,7 +3,7 @@ package poller
 import (
 	"context"
 
-	"github.com/plan42-ai/plan42-cli/internal/util"
+	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/sdk-go/p42/messages"
 )
 

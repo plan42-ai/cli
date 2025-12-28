@@ -7,7 +7,7 @@ import (
 	"syscall"
 
 	"github.com/alecthomas/kong"
-	"github.com/plan42-ai/plan42-cli/internal/util"
+	"github.com/plan42-ai/cli/internal/util"
 )
 
 type RunnerExecOptions struct {
