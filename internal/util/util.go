@@ -42,3 +42,11 @@ func DefaultRunnerConfigFileName() (string, error) {
 	}
 	return path.Join(home, ".config", "plan42-runner.toml"), nil
 }
+
+func ExecutableDir() (string, error) {
+	execPath, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return path.Dir(execPath), nil
+}

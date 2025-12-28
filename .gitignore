@@ -1,4 +1,7 @@
 .idea
 *~
-cmd/plan42-runner/plan42-runner
-cmd/plan42-runner-config/plan42-runner-config
+plan42
+plan42-runner
+plan42-runner-config
+dist
+

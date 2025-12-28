@@ -16,14 +16,27 @@ endif
 
 VERSION = "$(PROJECT_MAJOR_VERSION).$(PROJECT_MINOR_VERSION).$(PROJECT_PATCH_VERSION)$(PROJECT_ADDITIONAL_VERSION)"
 
+.PHONY: clean
+clean:
+	rm -f ./plan42-runner
+	rm -f ./plan42-runner-config
+	rm -f ./plan42
+	rm -rf ./dist
+	go clean ./...
+
 .PHONY: build
 build:
-	go build ./...
+	go build ./cmd/plan42-runner
+	go build ./cmd/plan42-runner-config
+	go build ./cmd/plan42
 
-.PHONY: tag
-tag:
-	git tag v$(VERSION)
-	git push origin v$(VERSION)
+.PHONY: package
+package: build
+	./package.sh "$(VERSION)"
+
+.PHONY: gh-version
+gh-version:
+	./ghversion.sh "$(VERSION)"
 
 .PHONY: fmt
 fmt:
