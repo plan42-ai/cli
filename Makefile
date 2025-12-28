@@ -14,7 +14,7 @@ else
     PROJECT_ADDITIONAL_VERSION := -$(shell TZ=America/Los_Angeles date '+%Y-%m-%d.%s')
 endif
 
-VERSION = "$(PROJECT_MAJOR_VERSION).$(PROJECT_MINOR_VERSION).$(PROJECT_PATCH_VERSION)$(PROJECT_ADDITIONAL_VERSION)"
+VERSION = $(PROJECT_MAJOR_VERSION).$(PROJECT_MINOR_VERSION).$(PROJECT_PATCH_VERSION)$(PROJECT_ADDITIONAL_VERSION)
 
 .PHONY: clean
 clean:
@@ -28,7 +28,7 @@ clean:
 build:
 	go build ./cmd/plan42-runner
 	go build ./cmd/plan42-runner-config
-	go build ./cmd/plan42
+	go build -ldflags "-X main.Version=$(VERSION)" ./cmd/plan42
 
 .PHONY: package
 package: build
