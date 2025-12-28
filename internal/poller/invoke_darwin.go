@@ -10,9 +10,9 @@ import (
 	"os/exec"
 
 	"github.com/google/uuid"
-	"github.com/plan42-ai/plan42-cli/internal/docker"
-	"github.com/plan42-ai/plan42-cli/internal/log"
-	"github.com/plan42-ai/plan42-cli/internal/util"
+	"github.com/plan42-ai/cli/internal/docker"
+	"github.com/plan42-ai/cli/internal/log"
+	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/sdk-go/p42/messages"
 )
 

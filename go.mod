@@ -1,4 +1,4 @@
-module github.com/plan42-ai/plan42-cli
+module github.com/plan42-ai/cli
 
 go 1.25.5
 

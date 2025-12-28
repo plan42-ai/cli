@@ -13,11 +13,11 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/plan42-ai/cli/internal/config"
+	"github.com/plan42-ai/cli/internal/log"
+	"github.com/plan42-ai/cli/internal/poller"
+	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/openid/jwt"
-	"github.com/plan42-ai/plan42-cli/internal/config"
-	"github.com/plan42-ai/plan42-cli/internal/log"
-	"github.com/plan42-ai/plan42-cli/internal/poller"
-	"github.com/plan42-ai/plan42-cli/internal/util"
 	"github.com/plan42-ai/sdk-go/p42"
 )
 
