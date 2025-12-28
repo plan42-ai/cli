@@ -1,23 +1,42 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
+	"runtime"
 	"syscall"
+	"time"
 
 	"github.com/alecthomas/kong"
+	"github.com/pelletier/go-toml/v2"
+	"github.com/plan42-ai/cli/internal/config"
+	"github.com/plan42-ai/cli/internal/launchctl"
 	"github.com/plan42-ai/cli/internal/util"
 )
 
-var Version = "dev"
+var (
+	Version                = "dev"
+	ErrRunnerNotConfigured = errors.New("runner not configured. Run `plan42 runner configure` first, then re-run `plan42 runner enable`")
+)
+
+const (
+	runnerAgentLabel = "ai.plan42.runner"
+)
 
 type RunnerExecOptions struct {
 	ConfigFile string `help:"Path to config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
 }
 
+type RunnerEnableOptions struct {
+	ConfigFile string `help:"Path to config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
+}
+
 type RunnerOptions struct {
 	Config RunnerConfigOptions `cmd:"" help:"Edit the remote runner service config file."`
+	Enable RunnerEnableOptions `cmd:"" help:"Enable the plan42 runner as a service."`
 	Exec   RunnerExecOptions   `cmd:"" help:"Execute the plan42 remote runner service."`
 }
 
@@ -40,6 +59,105 @@ func forwardToSibling(execName string, commandDepth int) error {
 
 func (r *RunnerExecOptions) Run() error {
 	return forwardToSibling("plan42-runner", 3)
+}
+
+func (r *RunnerEnableOptions) Run() error {
+	if runtime.GOOS != "darwin" {
+		return fmt.Errorf("runner enable not supported on %s", runtime.GOOS)
+	}
+
+	configPath, err := r.resolveConfigPath()
+	if err != nil {
+		return err
+	}
+
+	err = validateRunnerConfig(configPath)
+	if err != nil {
+		return err
+	}
+
+	return r.enableLaunchAgent(configPath)
+}
+
+func (r *RunnerEnableOptions) resolveConfigPath() (string, error) {
+	configPath := r.ConfigFile
+	if configPath == "" {
+		var err error
+		configPath, err = util.DefaultRunnerConfigFileName()
+		if err != nil {
+			return "", fmt.Errorf("unable to determine default config file: %w", err)
+		}
+	}
+
+	absPath, err := filepath.Abs(configPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve config file path: %w", err)
+	}
+
+	return absPath, nil
+}
+
+func validateRunnerConfig(configPath string) error {
+	f, err := os.Open(configPath)
+	if err != nil {
+		return ErrRunnerNotConfigured
+	}
+	defer util.Close(f)
+
+	decoder := toml.NewDecoder(f)
+	var cfg config.Config
+	err = decoder.Decode(&cfg)
+	if err != nil {
+		return ErrRunnerNotConfigured
+	}
+
+	if cfg.Runner.RunnerToken == "" || cfg.Runner.URL == "" {
+		return ErrRunnerNotConfigured
+	}
+
+	return nil
+}
+
+func (r *RunnerEnableOptions) enableLaunchAgent(configPath string) error {
+	execDir, err := util.ExecutableDir()
+	if err != nil {
+		return fmt.Errorf("unable to determine executable directory: %w", err)
+	}
+	runnerPath := filepath.Join(execDir, "plan42-runner")
+
+	_, err = os.Stat(runnerPath)
+	if err != nil {
+		return fmt.Errorf("unable to locate plan42-runner executable: %w", err)
+	}
+
+	agent := launchctl.Agent{
+		Name: runnerAgentLabel,
+		Argv: []string{
+			runnerPath,
+			"--config-file",
+			configPath,
+		},
+		ExitTimeout: util.Pointer(5 * time.Minute),
+		CreateLog:   true,
+	}
+	err = agent.Create()
+	if err != nil {
+		return err
+	}
+
+	_ = agent.Shutdown()
+	err = agent.Bootstrap()
+	if err != nil {
+		return fmt.Errorf("failed to bootstrap launchctl agent: %w", err)
+	}
+
+	err = agent.Kickstart()
+
+	if err != nil {
+		return fmt.Errorf("failed to start launchctl agent: %w", err)
+	}
+
+	return nil
 }
 
 type RunnerConfigOptions struct {
@@ -70,6 +188,8 @@ func main() {
 	switch kongCtx.Command() {
 	case "runner exec":
 		err = options.Runner.Exec.Run()
+	case "runner enable":
+		err = options.Runner.Enable.Run()
 	case "runner config":
 		err = options.Runner.Config.Run()
 	case "version":

@@ -104,7 +104,7 @@ func main() {
 }
 
 func setupLogging() {
-	handler := log.NewContextHandler(slog.NewTextHandler(os.Stdout, nil))
+	handler := log.NewContextHandler(slog.NewTextHandler(os.Stderr, nil))
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
 }
