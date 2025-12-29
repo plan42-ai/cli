@@ -10,6 +10,8 @@ import (
 	"github.com/plan42-ai/cli/internal/util"
 )
 
+var Version = "dev"
+
 type RunnerExecOptions struct {
 	ConfigFile string `help:"Path to config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
 }
@@ -48,8 +50,16 @@ func (rc *RunnerConfigOptions) Run() error {
 	return forwardToSibling("plan42-runner-config", 3)
 }
 
+type VersionOptions struct{}
+
+func (v *VersionOptions) Run() error {
+	fmt.Println(Version)
+	return nil
+}
+
 type Options struct {
-	Runner RunnerOptions `cmd:""`
+	Runner  RunnerOptions  `cmd:""`
+	Version VersionOptions `cmd:"" help:"Show version information."`
 }
 
 func main() {
@@ -62,6 +72,8 @@ func main() {
 		err = options.Runner.Exec.Run()
 	case "runner config":
 		err = options.Runner.Config.Run()
+	case "version":
+		err = options.Version.Run()
 	default:
 		err = fmt.Errorf("unknown command: %s", kongCtx.Command())
 	}
