@@ -13,10 +13,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/plan42-ai/cli/internal/log"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/concurrency"
 	"github.com/plan42-ai/ecies"
+	"github.com/plan42-ai/log"
 	"github.com/plan42-ai/sdk-go/p42"
 	"github.com/plan42-ai/sdk-go/p42/messages"
 )

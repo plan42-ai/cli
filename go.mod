@@ -12,6 +12,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/plan42-ai/concurrency v1.0.3
 	github.com/plan42-ai/ecies v1.0.3
+	github.com/plan42-ai/log v1.0.2
 	github.com/plan42-ai/openid v1.0.3
 	github.com/plan42-ai/sdk-go v1.0.3
 	github.com/plan42-ai/xml v1.25.5-2
