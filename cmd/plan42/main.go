@@ -176,14 +176,18 @@ func (v *VersionOptions) Run() error {
 }
 
 type Options struct {
-	Runner  RunnerOptions  `cmd:""`
-	Version VersionOptions `cmd:"" help:"Show version information."`
+	Version kong.VersionFlag `help:"Print version and exit" name:"version" short:"v"`
+	Runner  RunnerOptions    `cmd:""`
 }
 
 func main() {
 	defer util.HandleExit()
 	var options Options
-	kongCtx := kong.Parse(&options)
+	kongCtx := kong.Parse(
+		&options,
+		kong.Vars{"version": Version},
+	)
+
 	var err error
 	switch kongCtx.Command() {
 	case "runner exec":
@@ -192,8 +196,6 @@ func main() {
 		err = options.Runner.Enable.Run()
 	case "runner config":
 		err = options.Runner.Config.Run()
-	case "version":
-		err = options.Version.Run()
 	default:
 		err = fmt.Errorf("unknown command: %s", kongCtx.Command())
 	}
