@@ -14,9 +14,9 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/plan42-ai/cli/internal/config"
-	"github.com/plan42-ai/cli/internal/log"
 	"github.com/plan42-ai/cli/internal/poller"
 	"github.com/plan42-ai/cli/internal/util"
+	"github.com/plan42-ai/log"
 	"github.com/plan42-ai/openid/jwt"
 	"github.com/plan42-ai/sdk-go/p42"
 )
@@ -73,7 +73,7 @@ func (o *Options) process() error {
 
 func main() {
 	defer util.HandleExit()
-	setupLogging()
+	log.SetupTextLogging()
 	var options Options
 	kong.Parse(&options)
 	err := options.process()
@@ -101,12 +101,6 @@ func main() {
 	} else {
 		slog.Info("queues drained successfully, shutting down")
 	}
-}
-
-func setupLogging() {
-	handler := log.NewContextHandler(slog.NewTextHandler(os.Stderr, nil))
-	logger := slog.New(handler)
-	slog.SetDefault(logger)
 }
 
 func extractParamsFromToken(token string) (tokenID string, runnerID string, err error) {

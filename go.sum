@@ -66,6 +66,8 @@ github.com/plan42-ai/concurrency v1.0.3 h1:gjlsg1CNUA+sdI3m4Rl6IVeLW011kNV0+QmwO
 github.com/plan42-ai/concurrency v1.0.3/go.mod h1:u5LP6bVGRMyUThh6z1EKulBPSexjB3hwgPVWxmHTPD4=
 github.com/plan42-ai/ecies v1.0.3 h1:0EycKX4d4Ol0Y+s6chGaFJuPFvLEXBUwXfEiwImXY6U=
 github.com/plan42-ai/ecies v1.0.3/go.mod h1:o/f87i4/4Ca+KLbqJB/rsbbC85NnhP+sgVN7sbKfwNE=
+github.com/plan42-ai/log v1.0.2 h1:ysnuzuES2+05EzgrSJThFPpp/IhmM8apkyyJq8bMv1Q=
+github.com/plan42-ai/log v1.0.2/go.mod h1:RYP+y3ot7ed9XMgbOXy5MX1xpstjoSiIDnp02b+58Lg=
 github.com/plan42-ai/openid v1.0.3 h1:6oX6qBO66O0CG5tPvJ5XCMlN145BYZMbQRiqjb0TY3c=
 github.com/plan42-ai/openid v1.0.3/go.mod h1:ktbyPnO2KweuE/oABJU1QsmyvNQCvQf9HdsFd/zIEzI=
 github.com/plan42-ai/sdk-go v1.0.3 h1:GxAIklKJ7iAyxXK2cmVU1KTR2BDgwPkXKfhDaPWVCPY=
