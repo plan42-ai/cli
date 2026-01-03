@@ -32,7 +32,10 @@ type queueInfo struct {
 	privateKey *ecdsa.PrivateKey
 }
 
+type Option func(p *Poller)
+
 type Poller struct {
+	PlatformFields
 	cg                     *concurrency.ContextGroup
 	ctx                    context.Context
 	queues                 []*queueInfo
@@ -362,7 +365,7 @@ func (p *Poller) processMessage(msg *p42.RunnerMessage, qi *queueInfo) {
 		slog.ErrorContext(ctx, "unable to decrypt ECIES message", "error", err)
 		return
 	}
-	parsedMsg, err := parseMessage(decrypted)
+	parsedMsg, err := p.parseMessage(decrypted)
 	if err != nil {
 		slog.ErrorContext(ctx, "unable to parse message", "error", err)
 		return
@@ -397,7 +400,7 @@ func (p *Poller) processMessage(msg *p42.RunnerMessage, qi *queueInfo) {
 	}
 }
 
-func parseMessage(data []byte) (pollerMessage, error) {
+func (p *Poller) parseMessage(data []byte) (pollerMessage, error) {
 	var tmp struct {
 		Type messages.MessageType
 	}
@@ -422,6 +425,7 @@ func parseMessage(data []byte) (pollerMessage, error) {
 	if err != nil {
 		return nil, err
 	}
+	target.Init(p)
 	return target, nil
 }
 
@@ -560,7 +564,7 @@ func (p *Poller) signalDrain(qi *queueInfo) {
 	}
 }
 
-func New(client *p42.Client, tenantID string, runnerID string) *Poller {
+func New(client *p42.Client, tenantID string, runnerID string, options ...Option) *Poller {
 	cg := concurrency.NewContextGroup()
 	ctx := log.WithContextAttrs(
 		cg.Context(),
@@ -594,6 +598,9 @@ func New(client *p42.Client, tenantID string, runnerID string) *Poller {
 		runnerID:               runnerID,
 		queueManagementBackoff: concurrency.NewBackoff(10*time.Millisecond, 5*time.Second),
 		batchBackoff:           concurrency.NewBackoff(1*time.Millisecond, 50*time.Millisecond),
+	}
+	for _, opt := range options {
+		opt(ret)
 	}
 	ret.cg.Add(2)
 	go ret.scale()

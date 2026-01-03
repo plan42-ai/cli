@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/google/renameio/v2"
 	"github.com/pelletier/go-toml/v2"
+	runner_config "github.com/plan42-ai/cli/internal/cli/runnerconfig"
 	"github.com/plan42-ai/cli/internal/config"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/openid/jwt"
@@ -87,7 +88,7 @@ type model struct {
 	cfg                  config.Config
 	validateErr          error
 	saveErr              error
-	options              *Options
+	options              *runner_config.Options
 }
 
 func (m model) Init() tea.Cmd {
@@ -542,24 +543,9 @@ func (m *model) onUp(cmds []tea.Cmd) []tea.Cmd {
 	return cmds
 }
 
-type Options struct {
-	ConfigFile string `help:"Path to config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
-}
-
-func (o *Options) Process() error {
-	var err error
-	if o.ConfigFile == "" {
-		o.ConfigFile, err = util.DefaultRunnerConfigFileName()
-		if err != nil {
-			return fmt.Errorf("failed to determine default config file path: %w", err)
-		}
-	}
-	return nil
-}
-
 func main() {
 	defer util.HandleExit()
-	var options Options
+	var options runner_config.Options
 	kong.Parse(&options)
 	err := options.Process()
 	if err != nil {
@@ -575,7 +561,7 @@ func main() {
 	}
 }
 
-func initialModel(options *Options) tea.Model {
+func initialModel(options *runner_config.Options) tea.Model {
 	ret := &model{
 		selectedSection:      runnerSection,
 		selectedSectionIndex: 0,

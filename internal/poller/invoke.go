@@ -5,5 +5,6 @@ import (
 )
 
 type pollerInvokeAgentRequest struct {
+	InvokePlatformFields
 	messages.InvokeAgentRequest
 }
