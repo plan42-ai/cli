@@ -8,5 +8,6 @@ import (
 
 type pollerMessage interface {
 	messages.Message
+	Init(p *Poller)
 	Process(ctx context.Context) messages.Message
 }

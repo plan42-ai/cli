@@ -12,71 +12,19 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
-	"github.com/pelletier/go-toml/v2"
-	"github.com/plan42-ai/cli/internal/config"
+	"github.com/plan42-ai/cli/internal/cli/runner"
 	"github.com/plan42-ai/cli/internal/poller"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/log"
 	"github.com/plan42-ai/openid/jwt"
-	"github.com/plan42-ai/sdk-go/p42"
 )
-
-type Options struct {
-	Ctx        context.Context `kong:"-"`
-	Client     *p42.Client     `kong:"-"`
-	Config     config.Config   `kong:"-"`
-	ConfigFile string          `help:"Path to config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
-}
-
-func (o *Options) process() error {
-	var err error
-	if o.ConfigFile == "" {
-		o.ConfigFile, err = util.DefaultRunnerConfigFileName()
-		if err != nil {
-			return fmt.Errorf("failed to determine default config file path: %w", err)
-		}
-	}
-
-	f, err := os.Open(o.ConfigFile)
-	if err != nil {
-		return fmt.Errorf("failed to open config file: %w", err)
-	}
-	defer util.Close(f)
-
-	decoder := toml.NewDecoder(f)
-	err = decoder.Decode(&o.Config)
-	if err != nil {
-		return fmt.Errorf("failed to parse config file: %w", err)
-	}
-
-	if o.Config.Runner.RunnerToken == "" {
-		return errors.New("runner token not specified")
-	}
-
-	if o.Config.Runner.URL == "" {
-		return errors.New("endpoint URL not specified")
-	}
-
-	clientOptions := []p42.Option{
-		p42.WithAPIToken(o.Config.Runner.RunnerToken),
-	}
-
-	if o.Config.Runner.URL == "https://localhost:7443" {
-		clientOptions = append(clientOptions, p42.WithInsecureSkipVerify())
-	}
-
-	o.Ctx = context.Background()
-	o.Client = p42.NewClient(o.Config.Runner.URL, clientOptions...)
-
-	return nil
-}
 
 func main() {
 	defer util.HandleExit()
 	log.SetupTextLogging()
-	var options Options
+	var options runner.Options
 	kong.Parse(&options)
-	err := options.process()
+	err := options.Process()
 	if err != nil {
 		slog.Error("error processing options", "error", err)
 		panic(util.ExitCode(1))
@@ -86,7 +34,7 @@ func main() {
 		slog.Error("error extracting params from token", "error", err)
 		panic(util.ExitCode(2))
 	}
-	p := poller.New(options.Client, tokenID, runnerID)
+	p := poller.New(options.Client, tokenID, runnerID, options.PollerOptions()...)
 	defer util.Close(p)
 
 	sigCh := make(chan os.Signal, 1)

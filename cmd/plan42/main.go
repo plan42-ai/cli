@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/plan42-ai/cli/internal/cli/runner"
+	runner_config "github.com/plan42-ai/cli/internal/cli/runnerconfig"
 	"github.com/plan42-ai/cli/internal/config"
 	"github.com/plan42-ai/cli/internal/launchctl"
 	"github.com/plan42-ai/cli/internal/util"
@@ -27,7 +30,7 @@ const (
 )
 
 type RunnerExecOptions struct {
-	ConfigFile string `help:"Path to config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
+	runner.Options
 }
 
 type RunnerEnableOptions struct {
@@ -125,6 +128,11 @@ func (r *RunnerEnableOptions) enableLaunchAgent(configPath string) error {
 	}
 	runnerPath := filepath.Join(execDir, "plan42-runner")
 
+	containerPath, err := exec.LookPath("container")
+	if err != nil {
+		return fmt.Errorf("unable to find `container` on path: %w", err)
+	}
+
 	_, err = os.Stat(runnerPath)
 	if err != nil {
 		return fmt.Errorf("unable to locate plan42-runner executable: %w", err)
@@ -136,6 +144,8 @@ func (r *RunnerEnableOptions) enableLaunchAgent(configPath string) error {
 			runnerPath,
 			"--config-file",
 			configPath,
+			"--container-path",
+			containerPath,
 		},
 		ExitTimeout: util.Pointer(5 * time.Minute),
 		CreateLog:   true,
@@ -161,7 +171,7 @@ func (r *RunnerEnableOptions) enableLaunchAgent(configPath string) error {
 }
 
 type RunnerConfigOptions struct {
-	ConfigFile string `help:"Path to config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
+	runner_config.Options
 }
 
 func (rc *RunnerConfigOptions) Run() error {

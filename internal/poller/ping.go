@@ -10,7 +10,12 @@ type pollerPingRequest struct {
 	messages.PingRequest
 }
 
-func (p *pollerPingRequest) Process(_ context.Context) messages.Message {
+func (req *pollerPingRequest) Process(_ context.Context) messages.Message {
 	// ping doesn't do anything except return a ping response.
 	return &messages.PingResponse{}
+}
+
+func (req *pollerPingRequest) Init(p *Poller) {
+	_ = p
+	// do nothing
 }
