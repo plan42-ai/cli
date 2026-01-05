@@ -29,18 +29,11 @@ const (
 	runnerAgentLabel = "ai.plan42.runner"
 )
 
-type RunnerExecOptions struct {
-	runner.Options
-}
-
-type RunnerEnableOptions struct {
-	ConfigFile string `help:"Path to config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
-}
-
 type RunnerOptions struct {
 	Config RunnerConfigOptions `cmd:"" help:"Edit the remote runner service config file."`
-	Enable RunnerEnableOptions `cmd:"" help:"Enable the plan42 runner as a service."`
+	Enable RunnerEnableOptions `cmd:"" help:"Enable the plan42 runner on login and start the service."`
 	Exec   RunnerExecOptions   `cmd:"" help:"Execute the plan42 remote runner service."`
+	Stop   RunnerStopOptions   `cmd:"" help:"Stop the plan42 runner service."`
 }
 
 func forwardToSibling(execName string, commandDepth int) error {
@@ -60,8 +53,16 @@ func forwardToSibling(execName string, commandDepth int) error {
 	return nil
 }
 
+type RunnerExecOptions struct {
+	runner.Options
+}
+
 func (r *RunnerExecOptions) Run() error {
 	return forwardToSibling("plan42-runner", 3)
+}
+
+type RunnerEnableOptions struct {
+	ConfigFile string `help:"Path to config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
 }
 
 func (r *RunnerEnableOptions) Run() error {
@@ -178,10 +179,20 @@ func (rc *RunnerConfigOptions) Run() error {
 	return forwardToSibling("plan42-runner-config", 3)
 }
 
-type VersionOptions struct{}
+type RunnerStopOptions struct{}
 
-func (v *VersionOptions) Run() error {
-	fmt.Println(Version)
+func (rs *RunnerStopOptions) Run() error {
+	if runtime.GOOS != "darwin" {
+		return fmt.Errorf("runner stop not supported on %s", runtime.GOOS)
+	}
+
+	agent := launchctl.Agent{
+		Name: runnerAgentLabel,
+	}
+	err := agent.Shutdown()
+	if err != nil {
+		return fmt.Errorf("failed to stop launchctl agent: %w", err)
+	}
 	return nil
 }
 
@@ -206,6 +217,8 @@ func main() {
 		err = options.Runner.Enable.Run()
 	case "runner config":
 		err = options.Runner.Config.Run()
+	case "runner stop":
+		err = options.Runner.Stop.Run()
 	default:
 		err = fmt.Errorf("unknown command: %s", kongCtx.Command())
 	}
