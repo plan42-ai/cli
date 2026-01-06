@@ -27,6 +27,7 @@ var (
 
 const (
 	runnerAgentLabel = "ai.plan42.runner"
+	darwin           = "darwin"
 )
 
 type RunnerOptions struct {
@@ -34,6 +35,7 @@ type RunnerOptions struct {
 	Enable RunnerEnableOptions `cmd:"" help:"Enable the plan42 runner on login and start the service."`
 	Exec   RunnerExecOptions   `cmd:"" help:"Execute the plan42 remote runner service."`
 	Stop   RunnerStopOptions   `cmd:"" help:"Stop the plan42 runner service."`
+	Status RunnerStatusOptions `cmd:"" help:"Show the status of the plan42 runner service."`
 }
 
 func forwardToSibling(execName string, commandDepth int) error {
@@ -66,7 +68,7 @@ type RunnerEnableOptions struct {
 }
 
 func (r *RunnerEnableOptions) Run() error {
-	if runtime.GOOS != "darwin" {
+	if runtime.GOOS != darwin {
 		return fmt.Errorf("runner enable not supported on %s", runtime.GOOS)
 	}
 
@@ -182,7 +184,7 @@ func (rc *RunnerConfigOptions) Run() error {
 type RunnerStopOptions struct{}
 
 func (rs *RunnerStopOptions) Run() error {
-	if runtime.GOOS != "darwin" {
+	if runtime.GOOS != darwin {
 		return fmt.Errorf("runner stop not supported on %s", runtime.GOOS)
 	}
 
@@ -193,6 +195,24 @@ func (rs *RunnerStopOptions) Run() error {
 	if err != nil {
 		return fmt.Errorf("failed to stop launchctl agent: %w", err)
 	}
+	return nil
+}
+
+type RunnerStatusOptions struct{}
+
+func (rs *RunnerStatusOptions) Run() error {
+	if runtime.GOOS != darwin {
+		return fmt.Errorf("runner status not supported on %s", runtime.GOOS)
+	}
+	agent := launchctl.Agent{
+		Name: runnerAgentLabel,
+	}
+	output, err := agent.Status()
+
+	if err != nil {
+		return fmt.Errorf("failed to get runner status: %w", err)
+	}
+	fmt.Print(output)
 	return nil
 }
 
@@ -219,6 +239,8 @@ func main() {
 		err = options.Runner.Config.Run()
 	case "runner stop":
 		err = options.Runner.Stop.Run()
+	case "runner status":
+		err = options.Runner.Status.Run()
 	default:
 		err = fmt.Errorf("unknown command: %s", kongCtx.Command())
 	}

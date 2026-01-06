@@ -1,6 +1,7 @@
 package launchctl
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -178,6 +179,18 @@ func (a *Agent) Shutdown() error {
 	}
 	cmd := exec.Command("launchctl", "bootout", label, plistPath)
 	return cmd.Run()
+}
+
+func (a *Agent) Status() (string, error) {
+	fullLabel := fmt.Sprintf("gui/%d/%s", os.Getuid(), a.Name)
+	cmd := exec.Command("launchctl", "print", fullLabel)
+	output, err := cmd.CombinedOutput()
+	outputStr := string(output)
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && strings.Contains(outputStr, "Could not find service ") {
+		return "Not Running", nil
+	}
+	return outputStr, err
 }
 
 func (a *Agent) Bootstrap() error {
