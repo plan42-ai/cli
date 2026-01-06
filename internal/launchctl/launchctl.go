@@ -169,6 +169,7 @@ func (a *Agent) PlistPath() (string, error) {
 func (a *Agent) FullLabel() string {
 	return fmt.Sprintf("gui/%d/%s", os.Getuid(), a.Name)
 }
+
 func (a *Agent) Shutdown() error {
 	label := fmt.Sprintf("gui/%d", os.Getuid())
 	plistPath, err := a.PlistPath()
