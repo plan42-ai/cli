@@ -256,3 +256,95 @@ func KillJob(jobID string) error {
 
 	return nil
 }
+
+func DeleteJobLog(jobID string) error {
+	err := ValidateJobID(jobID)
+	if err != nil {
+		return err
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	logPath := filepath.Join(homeDir, "Library", "Logs", RunnerAgentLabel, jobID)
+
+	err = os.Remove(logPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	return nil
+}
+
+func GetLocaJobIDs(ctx context.Context) ([]string, error) {
+	running := make(map[string]bool)
+	jobIDs := make([]string, 0)
+
+	output, err := exec.CommandContext(ctx, "container", "ls").Output()
+	if err != nil {
+		return nil, err
+	}
+
+	reader := bufio.NewReader(bytes.NewReader(output))
+	lineIndex := 0
+	for {
+		line, _, readErr := reader.ReadLine()
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return nil, readErr
+		}
+
+		lineIndex++
+		if lineIndex == 1 {
+			continue
+		}
+
+		fields := strings.Fields(string(line))
+		if len(fields) == 0 {
+			continue
+		}
+
+		containerID := fields[0]
+		if _, ok := buildJob(containerID, true); !ok {
+			continue
+		}
+
+		running[containerID] = true
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+
+	logDir := filepath.Join(homeDir, "Library", "Logs", RunnerAgentLabel)
+	entries, dirErr := os.ReadDir(logDir)
+	if dirErr != nil {
+		if errors.Is(dirErr, os.ErrNotExist) {
+			return jobIDs, nil
+		}
+		return jobIDs, dirErr
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if running[name] {
+			continue
+		}
+		if _, ok := buildJob(name, false); !ok {
+			continue
+		}
+		jobIDs = append(jobIDs, name)
+	}
+
+	sort.Strings(jobIDs)
+
+	return jobIDs, nil
+}
