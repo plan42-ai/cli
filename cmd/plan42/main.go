@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -22,6 +23,8 @@ import (
 	"github.com/plan42-ai/cli/internal/config"
 	"github.com/plan42-ai/cli/internal/launchctl"
 	"github.com/plan42-ai/cli/internal/util"
+	"github.com/plan42-ai/openid/jwt"
+	"github.com/plan42-ai/sdk-go/p42"
 )
 
 var (
@@ -30,7 +33,12 @@ var (
 )
 
 const (
-	darwin = "darwin"
+	darwin          = "darwin"
+	jobIDColumn     = "Job ID"
+	titleColumn     = "Title"
+	turnIndexColumn = "Turn Index"
+	runningColumn   = "Running?"
+	createdColumn   = "Created"
 )
 
 type RunnerOptions struct {
@@ -41,6 +49,7 @@ type RunnerOptions struct {
 	Status  RunnerStatusOptions  `cmd:"" help:"Show the status of the plan42 runner service."`
 	Logs    RunnerLogsOptions    `cmd:"" help:"Show the logs of the plan42 runner service."`
 	Disable RunnerDisableOptions `cmd:"" help:"Disable the plan42 runner service."`
+	Job     RunnerJobOptions     `cmd:"" help:"Commands related to managing runner jobs."`
 }
 
 func forwardToSibling(execName string, commandDepth int) error {
@@ -333,6 +342,124 @@ func (rl *RunnerDisableOptions) Run() error {
 	return nil
 }
 
+type RunnerJobOptions struct {
+	List ListRunnerJobOptions `cmd:"" help:"List local runner jobs."`
+}
+
+type ListRunnerJobOptions struct {
+	All        bool   `help:"When set, also list completed jobs." short:"a"`
+	Verbose    bool   `help:"Output verbose error logs."`
+	ConfigFile string `help:"Path to runner config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
+}
+
+func (l *ListRunnerJobOptions) Run() error {
+	if l.ConfigFile == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to determine home directory: %w", err)
+		}
+		l.ConfigFile = filepath.Join(homeDir, ".config", "plan42-runner.toml")
+	}
+
+	_, err := os.Stat(l.ConfigFile)
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("runner config file %s does not exist. Run `plan42 runner config` to configure the runner", l.ConfigFile)
+	}
+
+	f, err := os.Open(l.ConfigFile)
+	if err != nil {
+		return fmt.Errorf("failed to open runner config file: %w", err)
+	}
+	defer f.Close()
+
+	var cfg config.Config
+	err = toml.NewDecoder(f).Decode(&cfg)
+	if err != nil {
+		return fmt.Errorf("failed to decode runner config file: %w", err)
+	}
+
+	if cfg.Runner.RunnerToken == "" {
+		return fmt.Errorf("runner token not set in config. Run `plan42 runner config` to configure the runner")
+	}
+
+	s := strings.SplitN(cfg.Runner.RunnerToken, "_", 2)
+	if len(s) != 2 || s[0] != "p42r" {
+		return fmt.Errorf("invalid runner token in config. Run `plan42 runner config` to configure the runner")
+	}
+
+	token, err := jwt.Parse(s[1])
+	if err != nil {
+		return fmt.Errorf("invalid runner token in config. Run `plan42 runner config` to configure the runner")
+	}
+
+	tenantID := token.Payload.Subject
+	client := p42.NewClient(token.Payload.Issuer.String(), p42.WithAPIToken(cfg.Runner.RunnerToken))
+
+	jobs, err := container.GetLocalJobs(context.Background(), client, tenantID, l.Verbose, l.All)
+	if err != nil {
+		return fmt.Errorf("failed to list jobs: %w", err)
+	}
+
+	widths := getJobWidths(jobs)
+	fmt.Printf(
+		"%-*s     %-*s     %-*s     %-*s     %-*s\n",
+		widths.ID,
+		jobIDColumn,
+		widths.Title,
+		titleColumn,
+		widths.TurnIndex,
+		turnIndexColumn,
+		widths.Running,
+		runningColumn,
+		widths.Created,
+		createdColumn,
+	)
+	for _, job := range jobs {
+		var createdDate string
+		if !job.CreatedDate.IsZero() {
+			createdDate = job.CreatedDate.Local().Format(time.DateTime)
+		}
+		fmt.Printf(
+			"%-*s     %-*s     %-*d     %-*v     %-*s\n",
+			widths.ID,
+			fmt.Sprintf("plan42-%v-%d", job.TaskID, job.TurnIndex),
+			widths.Title,
+			job.TaskTitle,
+			widths.TurnIndex,
+			job.TurnIndex,
+			widths.Running,
+			job.Running,
+			widths.Created,
+			createdDate,
+		)
+	}
+	return nil
+}
+
+type JobWidths struct {
+	ID        int
+	Title     int
+	TurnIndex int
+	Running   int
+	Created   int
+}
+
+func getJobWidths(jobs []*container.Job) JobWidths {
+	var ret JobWidths
+	ret.Running = max(len("true"), len("false"), len(runningColumn))
+	for _, job := range jobs {
+		ret.ID = max(
+			ret.ID,
+			len(fmt.Sprintf("plan42-%v-%d", job.TaskID, job.TurnIndex)),
+			len(jobIDColumn),
+		)
+		ret.Title = max(ret.Title, len(job.TaskTitle), len(titleColumn))
+		ret.TurnIndex = max(ret.TurnIndex, len(fmt.Sprintf("%d", job.TurnIndex)), len(turnIndexColumn))
+		ret.Created = max(ret.Created, len(job.CreatedDate.Format(time.DateTime)), len(createdColumn))
+	}
+	return ret
+}
+
 type Options struct {
 	Version kong.VersionFlag `help:"Print version and exit" name:"version" short:"v"`
 	Runner  RunnerOptions    `cmd:""`
@@ -362,6 +489,8 @@ func main() {
 		err = options.Runner.Logs.Run()
 	case "runner disable":
 		err = options.Runner.Disable.Run()
+	case "runner job list":
+		err = options.Runner.Job.List.Run()
 	default:
 		err = fmt.Errorf("unknown command: %s", kongCtx.Command())
 	}
