@@ -36,6 +36,7 @@ type RunnerOptions struct {
 	Exec   RunnerExecOptions   `cmd:"" help:"Execute the plan42 remote runner service."`
 	Stop   RunnerStopOptions   `cmd:"" help:"Stop the plan42 runner service."`
 	Status RunnerStatusOptions `cmd:"" help:"Show the status of the plan42 runner service."`
+	Logs   RunnerLogsOption    `cmd:"" help:"Show the logs of the plan42 runner service."`
 }
 
 func forwardToSibling(execName string, commandDepth int) error {
@@ -216,6 +217,14 @@ func (rs *RunnerStatusOptions) Run() error {
 	return nil
 }
 
+type RunnerLogsOption struct {
+	Follow bool `name:"f" short:"f" help:"Follow log output."`
+}
+
+func (rl *RunnerLogsOption) Run() error {
+	return errors.New("not implemented")
+}
+
 type Options struct {
 	Version kong.VersionFlag `help:"Print version and exit" name:"version" short:"v"`
 	Runner  RunnerOptions    `cmd:""`
@@ -241,6 +250,8 @@ func main() {
 		err = options.Runner.Stop.Run()
 	case "runner status":
 		err = options.Runner.Status.Run()
+	case "runner logs":
+		err = options.Runner.Logs.Run()
 	default:
 		err = fmt.Errorf("unknown command: %s", kongCtx.Command())
 	}
