@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/sdk-go/p42"
 )
 
@@ -81,7 +82,11 @@ func startWorkers(ctx context.Context, client *p42.Client, tenantID string, verb
 func worker(ctx context.Context, client *p42.Client, tenantID string, verbose bool, jobCh <-chan *Job, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for job := range jobCh {
-		task, err := client.GetTask(ctx, &p42.GetTaskRequest{TenantID: tenantID, TaskID: job.TaskID})
+		task, err := client.GetTask(ctx, &p42.GetTaskRequest{
+			TenantID:       tenantID,
+			TaskID:         job.TaskID,
+			IncludeDeleted: util.Pointer(true),
+		})
 		if err != nil {
 			if verbose {
 				slog.ErrorContext(ctx, "GetTask failed", "taskID", job.TaskID, "error", err)
@@ -92,7 +97,12 @@ func worker(ctx context.Context, client *p42.Client, tenantID string, verbose bo
 
 		turn, err := client.GetTurn(
 			ctx,
-			&p42.GetTurnRequest{TenantID: tenantID, TaskID: job.TaskID, TurnIndex: job.TurnIndex},
+			&p42.GetTurnRequest{
+				TenantID:       tenantID,
+				TaskID:         job.TaskID,
+				TurnIndex:      job.TurnIndex,
+				IncludeDeleted: util.Pointer(true),
+			},
 		)
 		if err != nil {
 			if verbose {
