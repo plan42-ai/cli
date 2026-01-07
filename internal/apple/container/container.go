@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -229,4 +230,29 @@ func buildJob(containerID string, running bool) (*Job, bool) {
 		TurnIndex: turnIndex,
 		Running:   running,
 	}, true
+}
+
+func ValidateJobID(jobID string) error {
+	if _, ok := buildJob(jobID, true); !ok {
+		return fmt.Errorf("invalid job id: %s", jobID)
+	}
+
+	return nil
+}
+
+func KillJob(jobID string) error {
+	cmd := exec.Command("container", "kill", jobID)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err := cmd.Run()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			panic(util.ExitCode(exitErr.ExitCode()))
+		}
+		return err
+	}
+
+	return nil
 }

@@ -344,6 +344,7 @@ func (rl *RunnerDisableOptions) Run() error {
 
 type RunnerJobOptions struct {
 	List ListRunnerJobOptions `cmd:"" help:"List local runner jobs."`
+	Kill KillRunnerJobOptions `cmd:"" help:"Kill a local runner job."`
 }
 
 type ListRunnerJobOptions struct {
@@ -460,6 +461,23 @@ func getJobWidths(jobs []*container.Job) JobWidths {
 	return ret
 }
 
+type KillRunnerJobOptions struct {
+	JobID string `arg:"" help:"The job id to kill."`
+}
+
+func (k *KillRunnerJobOptions) Run() error {
+	if runtime.GOOS != darwin {
+		return fmt.Errorf("runner job kill not supported on %s", runtime.GOOS)
+	}
+
+	err := container.ValidateJobID(k.JobID)
+	if err != nil {
+		return err
+	}
+
+	return container.KillJob(k.JobID)
+}
+
 type Options struct {
 	Version kong.VersionFlag `help:"Print version and exit" name:"version" short:"v"`
 	Runner  RunnerOptions    `cmd:""`
@@ -491,6 +509,8 @@ func main() {
 		err = options.Runner.Disable.Run()
 	case "runner job list":
 		err = options.Runner.Job.List.Run()
+	case "runner job kill <job-id>":
+		err = options.Runner.Job.Kill.Run()
 	default:
 		err = fmt.Errorf("unknown command: %s", kongCtx.Command())
 	}
