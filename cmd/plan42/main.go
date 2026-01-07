@@ -347,9 +347,10 @@ func (rl *RunnerDisableOptions) Run() error {
 }
 
 type RunnerJobOptions struct {
-	List ListRunnerJobOptions `cmd:"" help:"List local runner jobs."`
-	Kill KillRunnerJobOptions `cmd:"" help:"Kill a local runner job."`
-	Logs RunnerJobLogsOptions `cmd:"" help:"Show the logs of a runner job."`
+	List  ListRunnerJobOptions  `cmd:"" help:"List local runner jobs."`
+	Kill  KillRunnerJobOptions  `cmd:"" help:"Kill a local runner job."`
+	Logs  RunnerJobLogsOptions  `cmd:"" help:"Show the logs of a runner job."`
+	Prune RunnerJobPruneOptions `cmd:"" help:"Remove log files for completed runner jobs."`
 }
 
 type ListRunnerJobOptions struct {
@@ -362,44 +363,52 @@ func (l *ListRunnerJobOptions) Run() error {
 	if l.ConfigFile == "" {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
-			return fmt.Errorf("failed to determine home directory: %w", err)
+			return nil, "", fmt.Errorf("failed to determine home directory: %w", err)
 		}
-		l.ConfigFile = filepath.Join(homeDir, ".config", "plan42-runner.toml")
+		configFile = filepath.Join(homeDir, ".config", "plan42-runner.toml")
 	}
 
-	_, err := os.Stat(l.ConfigFile)
+	_, err := os.Stat(configFile)
 	if errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("runner config file %s does not exist. Run `plan42 runner config` to configure the runner", l.ConfigFile)
+		return nil, "", fmt.Errorf("runner config file %s does not exist. Run `plan42 runner config` to configure the runner", configFile)
 	}
 
-	f, err := os.Open(l.ConfigFile)
+	f, err := os.Open(configFile)
 	if err != nil {
-		return fmt.Errorf("failed to open runner config file: %w", err)
+		return nil, "", fmt.Errorf("failed to open runner config file: %w", err)
 	}
 	defer f.Close()
 
 	var cfg config.Config
 	err = toml.NewDecoder(f).Decode(&cfg)
 	if err != nil {
-		return fmt.Errorf("failed to decode runner config file: %w", err)
+		return nil, "", fmt.Errorf("failed to decode runner config file: %w", err)
 	}
 
 	if cfg.Runner.RunnerToken == "" {
-		return fmt.Errorf("runner token not set in config. Run `plan42 runner config` to configure the runner")
+		return nil, "", fmt.Errorf("runner token not set in config. Run `plan42 runner config` to configure the runner")
 	}
 
 	s := strings.SplitN(cfg.Runner.RunnerToken, "_", 2)
 	if len(s) != 2 || s[0] != "p42r" {
-		return fmt.Errorf("invalid runner token in config. Run `plan42 runner config` to configure the runner")
+		return nil, "", fmt.Errorf("invalid runner token in config. Run `plan42 runner config` to configure the runner")
 	}
 
 	token, err := jwt.Parse(s[1])
 	if err != nil {
-		return fmt.Errorf("invalid runner token in config. Run `plan42 runner config` to configure the runner")
+		return nil, "", fmt.Errorf("invalid runner token in config. Run `plan42 runner config` to configure the runner")
 	}
 
-	tenantID := token.Payload.Subject
 	client := p42.NewClient(token.Payload.Issuer.String(), p42.WithAPIToken(cfg.Runner.RunnerToken))
+
+	return client, token.Payload.Subject, nil
+}
+
+func (l *ListRunnerJobOptions) Run() error {
+	client, tenantID, err := runnerClient(l.ConfigFile)
+	if err != nil {
+		return err
+	}
 
 	jobs, err := container.GetLocalJobs(context.Background(), client, tenantID, l.Verbose, l.All)
 	if err != nil {
@@ -428,7 +437,7 @@ func (l *ListRunnerJobOptions) Run() error {
 		fmt.Printf(
 			"%-*s     %-*s     %-*d     %-*v     %-*s\n",
 			widths.ID,
-			fmt.Sprintf("plan42-%v-%d", job.TaskID, job.TurnIndex),
+			formatJobID(job),
 			widths.Title,
 			job.TaskTitle,
 			widths.TurnIndex,
@@ -450,13 +459,17 @@ type JobWidths struct {
 	Created   int
 }
 
+func formatJobID(job *container.Job) string {
+	return fmt.Sprintf("plan42-%v-%d", job.TaskID, job.TurnIndex)
+}
+
 func getJobWidths(jobs []*container.Job) JobWidths {
 	var ret JobWidths
 	ret.Running = max(len("true"), len("false"), len(runningColumn))
 	for _, job := range jobs {
 		ret.ID = max(
 			ret.ID,
-			len(fmt.Sprintf("plan42-%v-%d", job.TaskID, job.TurnIndex)),
+			len(formatJobID(job)),
 			len(jobIDColumn),
 		)
 		ret.Title = max(ret.Title, len(job.TaskTitle), len(titleColumn))
@@ -464,6 +477,40 @@ func getJobWidths(jobs []*container.Job) JobWidths {
 		ret.Created = max(ret.Created, len(job.CreatedDate.Format(time.DateTime)), len(createdColumn))
 	}
 	return ret
+}
+
+type RunnerJobPruneOptions struct {
+	Verbose    bool   `help:"Output verbose error logs."`
+	ConfigFile string `help:"Path to runner config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
+}
+
+func (p *RunnerJobPruneOptions) Run() error {
+	if runtime.GOOS != darwin {
+		return fmt.Errorf("runner jobs prune not supported on %s", runtime.GOOS)
+	}
+
+	client, tenantID, err := runnerClient(p.ConfigFile)
+	if err != nil {
+		return err
+	}
+
+	jobs, err := container.GetLocalJobs(context.Background(), client, tenantID, p.Verbose, true)
+	if err != nil {
+		return fmt.Errorf("failed to list jobs: %w", err)
+	}
+
+	for _, job := range jobs {
+		if job.Running {
+			continue
+		}
+
+		err = container.DeleteJobLog(job)
+		if err != nil {
+			return fmt.Errorf("failed to delete log file for job %s: %w", formatJobID(job), err)
+		}
+	}
+
+	return nil
 }
 
 type RunnerJobLogsOptions struct {
@@ -549,6 +596,8 @@ func main() {
 		err = options.Runner.Job.Kill.Run()
 	case "runner job logs <jobid>":
 		err = options.Runner.Job.Logs.Run()
+	case "runner job prune":
+		err = options.Runner.Job.Prune.Run()
 	default:
 		err = fmt.Errorf("unknown command: %s", kongCtx.Command())
 	}

@@ -256,3 +256,27 @@ func KillJob(jobID string) error {
 
 	return nil
 }
+
+func jobLogFileName(job *Job) string {
+	return fmt.Sprintf("%s%s-%d", containerPrefix, job.TaskID, job.TurnIndex)
+}
+
+func DeleteJobLog(job *Job) error {
+	if job == nil {
+		return errors.New("job is nil")
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	logPath := filepath.Join(homeDir, "Library", "Logs", RunnerAgentLabel, jobLogFileName(job))
+
+	err = os.Remove(logPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	return nil
+}
