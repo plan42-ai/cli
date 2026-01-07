@@ -246,8 +246,12 @@ func (rl *RunnerLogsOptions) Run() error {
 		return fmt.Errorf("failed to determine log path: %w", err)
 	}
 
+	return viewLogFile(logPath, rl.Follow)
+}
+
+func viewLogFile(logPath string, follow bool) error {
 	var logCmd *exec.Cmd
-	if rl.Follow {
+	if follow {
 		logCmd = exec.Command("tail", "-f", logPath)
 	} else {
 		logCmd = exec.Command("cat", logPath)
@@ -255,7 +259,7 @@ func (rl *RunnerLogsOptions) Run() error {
 
 	logCmd.Stderr = os.Stderr
 
-	if rl.Follow || !isatty.IsTerminal(os.Stdout.Fd()) {
+	if follow || !isatty.IsTerminal(os.Stdout.Fd()) {
 		logCmd.Stdout = os.Stdout
 		return logCmd.Run()
 	}
@@ -345,6 +349,7 @@ func (rl *RunnerDisableOptions) Run() error {
 type RunnerJobOptions struct {
 	List ListRunnerJobOptions `cmd:"" help:"List local runner jobs."`
 	Kill KillRunnerJobOptions `cmd:"" help:"Kill a local runner job."`
+	Logs RunnerJobLogsOptions `cmd:"" help:"Show the logs of a runner job."`
 }
 
 type ListRunnerJobOptions struct {
@@ -461,6 +466,37 @@ func getJobWidths(jobs []*container.Job) JobWidths {
 	return ret
 }
 
+type RunnerJobLogsOptions struct {
+	JobID  string `arg:"" name:"jobid" help:"Runner job ID to view logs for."`
+	Follow bool   `name:"f" short:"f" help:"Follow log output."`
+}
+
+func (rl *RunnerJobLogsOptions) Run() error {
+	if runtime.GOOS != darwin {
+		return fmt.Errorf("runner job logs not supported on %s", runtime.GOOS)
+	}
+
+	logPath, err := runnerJobLogPath(rl.JobID)
+	if err != nil {
+		return err
+	}
+
+	return viewLogFile(logPath, rl.Follow)
+}
+
+func runnerJobLogPath(jobID string) (string, error) {
+	if strings.TrimSpace(jobID) == "" {
+		return "", fmt.Errorf("jobid is required")
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to determine user home directory: %w", err)
+	}
+
+	return filepath.Join(homeDir, "Library", "Logs", container.RunnerAgentLabel, jobID), nil
+}
+
 type KillRunnerJobOptions struct {
 	JobID string `arg:"" help:"The job id to kill."`
 }
@@ -511,6 +547,8 @@ func main() {
 		err = options.Runner.Job.List.Run()
 	case "runner job kill <job-id>":
 		err = options.Runner.Job.Kill.Run()
+	case "runner job logs <jobid>":
+		err = options.Runner.Job.Logs.Run()
 	default:
 		err = fmt.Errorf("unknown command: %s", kongCtx.Command())
 	}
