@@ -8,10 +8,13 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/alecthomas/kong"
+	"github.com/google/shlex"
+	"github.com/mattn/go-isatty"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/plan42-ai/cli/internal/cli/runner"
 	runner_config "github.com/plan42-ai/cli/internal/cli/runnerconfig"
@@ -36,6 +39,7 @@ type RunnerOptions struct {
 	Exec   RunnerExecOptions   `cmd:"" help:"Execute the plan42 remote runner service."`
 	Stop   RunnerStopOptions   `cmd:"" help:"Stop the plan42 runner service."`
 	Status RunnerStatusOptions `cmd:"" help:"Show the status of the plan42 runner service."`
+	Logs   RunnerLogsOption    `cmd:"" help:"Show the logs of the plan42 runner service."`
 }
 
 func forwardToSibling(execName string, commandDepth int) error {
@@ -216,6 +220,90 @@ func (rs *RunnerStatusOptions) Run() error {
 	return nil
 }
 
+type RunnerLogsOption struct {
+	Follow bool `name:"f" short:"f" help:"Follow log output."`
+}
+
+func (rl *RunnerLogsOption) Run() error {
+	if runtime.GOOS != darwin {
+		return fmt.Errorf("runner logs not supported on %s", runtime.GOOS)
+	}
+
+	agent := launchctl.Agent{Name: runnerAgentLabel}
+	logPath, err := agent.LogPath()
+	if err != nil {
+		return fmt.Errorf("failed to determine log path: %w", err)
+	}
+
+	var logCmd *exec.Cmd
+	if rl.Follow {
+		logCmd = exec.Command("tail", "-f", logPath)
+	} else {
+		logCmd = exec.Command("cat", logPath)
+	}
+
+	logCmd.Stderr = os.Stderr
+
+	if rl.Follow || !isatty.IsTerminal(os.Stdout.Fd()) {
+		logCmd.Stdout = os.Stdout
+		return logCmd.Run()
+	}
+
+	pager := os.Getenv("PAGER")
+	if strings.TrimSpace(pager) == "" {
+		pager = "less"
+	}
+
+	pagerArgs, err := shlex.Split(pager)
+	if err != nil {
+		return fmt.Errorf("failed to parse pager command: %w", err)
+	}
+
+	if len(pagerArgs) == 0 {
+		pagerArgs = []string{pager}
+	}
+
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("failed to create pager pipe: %w", err)
+	}
+
+	// #nosec: G204 : Subprocess launched with a potential tainted input or cmd arguments
+	// #    This is on purpose. We execute the PAGER that it configured in the users environment.
+	pagerCmd := exec.Command(pagerArgs[0], pagerArgs[1:]...)
+	pagerCmd.Stdin = reader
+	pagerCmd.Stdout = os.Stdout
+	pagerCmd.Stderr = os.Stderr
+
+	err = pagerCmd.Start()
+	if err != nil {
+		_ = reader.Close()
+		_ = writer.Close()
+		return fmt.Errorf("failed to start pager: %w", err)
+	}
+	_ = reader.Close()
+
+	logCmd.Stdout = writer
+
+	err = logCmd.Start()
+	if err != nil {
+		_ = writer.Close()
+		pagerErr := pagerCmd.Wait()
+		return errors.Join(fmt.Errorf("failed to start log command: %w", err), pagerErr)
+	}
+
+	logErr := logCmd.Wait()
+	_ = writer.Close()
+
+	pagerErr := pagerCmd.Wait()
+
+	if logErr != nil || pagerErr != nil {
+		return errors.Join(logErr, pagerErr)
+	}
+
+	return nil
+}
+
 type Options struct {
 	Version kong.VersionFlag `help:"Print version and exit" name:"version" short:"v"`
 	Runner  RunnerOptions    `cmd:""`
@@ -241,6 +329,8 @@ func main() {
 		err = options.Runner.Stop.Run()
 	case "runner status":
 		err = options.Runner.Status.Run()
+	case "runner logs":
+		err = options.Runner.Logs.Run()
 	default:
 		err = fmt.Errorf("unknown command: %s", kongCtx.Command())
 	}

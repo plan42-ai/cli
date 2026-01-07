@@ -107,14 +107,14 @@ func (a *Agent) ToXML() (string, error) {
 	}
 
 	if a.CreateLog {
-		homeDir, err := os.UserHomeDir()
+		logPath, err := a.LogPath()
 		if err != nil {
-			return "", fmt.Errorf("unable to determine user home dir: %w", err)
+			return "", err
 		}
 		doc.Dict.Entries = append(
 			doc.Dict.Entries,
 			keyElement{Value: "StandardErrorPath"},
-			stringElement{Value: path.Join(homeDir, "Library", "Logs", a.Name, "log.txt")},
+			stringElement{Value: logPath},
 		)
 	}
 
@@ -214,4 +214,12 @@ func (a *Agent) Kickstart() error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func (a *Agent) LogPath() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to determine user home directory: %w", err)
+	}
+	return path.Join(homeDir, "Library", "Logs", a.Name, "log.txt"), nil
 }
