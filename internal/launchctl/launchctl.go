@@ -3,6 +3,7 @@ package launchctl
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -193,6 +194,14 @@ func (a *Agent) Status() (string, error) {
 	return outputStr, err
 }
 
+func (a *Agent) Enable() error {
+	fullLabel := fmt.Sprintf("gui/%d/%s", os.Getuid(), a.Name)
+	cmd := exec.Command("launchctl", "enable", fullLabel)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	return cmd.Run()
+}
+
 func (a *Agent) Bootstrap() error {
 	label := fmt.Sprintf("gui/%d", os.Getuid())
 	plistPath, err := a.PlistPath()
@@ -222,4 +231,12 @@ func (a *Agent) LogPath() (string, error) {
 		return "", fmt.Errorf("failed to determine user home directory: %w", err)
 	}
 	return path.Join(homeDir, "Library", "Logs", a.Name, "log.txt"), nil
+}
+
+func (a *Agent) Disable() error {
+	fullLabel := fmt.Sprintf("gui/%d/%s", os.Getuid(), a.Name)
+	cmd := exec.Command("launchctl", "disable", fullLabel)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	return cmd.Run()
 }

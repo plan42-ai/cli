@@ -34,12 +34,13 @@ const (
 )
 
 type RunnerOptions struct {
-	Config RunnerConfigOptions `cmd:"" help:"Edit the remote runner service config file."`
-	Enable RunnerEnableOptions `cmd:"" help:"Enable the plan42 runner on login and start the service."`
-	Exec   RunnerExecOptions   `cmd:"" help:"Execute the plan42 remote runner service."`
-	Stop   RunnerStopOptions   `cmd:"" help:"Stop the plan42 runner service."`
-	Status RunnerStatusOptions `cmd:"" help:"Show the status of the plan42 runner service."`
-	Logs   RunnerLogsOption    `cmd:"" help:"Show the logs of the plan42 runner service."`
+	Config  RunnerConfigOptions  `cmd:"" help:"Edit the remote runner service config file."`
+	Enable  RunnerEnableOptions  `cmd:"" help:"Enable the plan42 runner on login and start the service."`
+	Exec    RunnerExecOptions    `cmd:"" help:"Execute the plan42 remote runner service."`
+	Stop    RunnerStopOptions    `cmd:"" help:"Stop the plan42 runner service."`
+	Status  RunnerStatusOptions  `cmd:"" help:"Show the status of the plan42 runner service."`
+	Logs    RunnerLogsOptions    `cmd:"" help:"Show the logs of the plan42 runner service."`
+	Disable RunnerDisableOptions `cmd:"" help:"Disable the plan42 runner service."`
 }
 
 func forwardToSibling(execName string, commandDepth int) error {
@@ -163,6 +164,7 @@ func (r *RunnerEnableOptions) enableLaunchAgent(configPath string) error {
 	}
 
 	_ = agent.Shutdown()
+	_ = agent.Enable()
 	err = agent.Bootstrap()
 	if err != nil {
 		return fmt.Errorf("failed to bootstrap launchctl agent: %w", err)
@@ -220,11 +222,11 @@ func (rs *RunnerStatusOptions) Run() error {
 	return nil
 }
 
-type RunnerLogsOption struct {
+type RunnerLogsOptions struct {
 	Follow bool `name:"f" short:"f" help:"Follow log output."`
 }
 
-func (rl *RunnerLogsOption) Run() error {
+func (rl *RunnerLogsOptions) Run() error {
 	if runtime.GOOS != darwin {
 		return fmt.Errorf("runner logs not supported on %s", runtime.GOOS)
 	}
@@ -304,6 +306,33 @@ func (rl *RunnerLogsOption) Run() error {
 	return nil
 }
 
+type RunnerDisableOptions struct {
+}
+
+func (rl *RunnerDisableOptions) Run() error {
+	if runtime.GOOS != darwin {
+		return fmt.Errorf("runner disable not supported on %s", runtime.GOOS)
+	}
+
+	agent := launchctl.Agent{Name: runnerAgentLabel}
+	err := agent.Shutdown()
+	if err != nil {
+		return fmt.Errorf("failed to stop launchctl agent: %w", err)
+	}
+
+	err = agent.Disable()
+	if err != nil {
+		return fmt.Errorf("failed to disable launchctl agent: %w", err)
+	}
+
+	plistFileName, err := agent.PlistPath()
+	if err == nil {
+		_ = os.Remove(plistFileName)
+	}
+
+	return nil
+}
+
 type Options struct {
 	Version kong.VersionFlag `help:"Print version and exit" name:"version" short:"v"`
 	Runner  RunnerOptions    `cmd:""`
@@ -331,6 +360,8 @@ func main() {
 		err = options.Runner.Status.Run()
 	case "runner logs":
 		err = options.Runner.Logs.Run()
+	case "runner disable":
+		err = options.Runner.Disable.Run()
 	default:
 		err = fmt.Errorf("unknown command: %s", kongCtx.Command())
 	}
