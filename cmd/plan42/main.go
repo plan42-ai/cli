@@ -16,6 +16,7 @@ import (
 	"github.com/google/shlex"
 	"github.com/mattn/go-isatty"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/plan42-ai/cli/internal/apple/container"
 	"github.com/plan42-ai/cli/internal/cli/runner"
 	runner_config "github.com/plan42-ai/cli/internal/cli/runnerconfig"
 	"github.com/plan42-ai/cli/internal/config"
@@ -29,8 +30,7 @@ var (
 )
 
 const (
-	runnerAgentLabel = "ai.plan42.runner"
-	darwin           = "darwin"
+	darwin = "darwin"
 )
 
 type RunnerOptions struct {
@@ -147,7 +147,7 @@ func (r *RunnerEnableOptions) enableLaunchAgent(configPath string) error {
 	}
 
 	agent := launchctl.Agent{
-		Name: runnerAgentLabel,
+		Name: container.RunnerAgentLabel,
 		Argv: []string{
 			runnerPath,
 			"--config-file",
@@ -195,7 +195,7 @@ func (rs *RunnerStopOptions) Run() error {
 	}
 
 	agent := launchctl.Agent{
-		Name: runnerAgentLabel,
+		Name: container.RunnerAgentLabel,
 	}
 	err := agent.Shutdown()
 	if err != nil {
@@ -211,7 +211,7 @@ func (rs *RunnerStatusOptions) Run() error {
 		return fmt.Errorf("runner status not supported on %s", runtime.GOOS)
 	}
 	agent := launchctl.Agent{
-		Name: runnerAgentLabel,
+		Name: container.RunnerAgentLabel,
 	}
 	output, err := agent.Status()
 
@@ -231,7 +231,7 @@ func (rl *RunnerLogsOptions) Run() error {
 		return fmt.Errorf("runner logs not supported on %s", runtime.GOOS)
 	}
 
-	agent := launchctl.Agent{Name: runnerAgentLabel}
+	agent := launchctl.Agent{Name: container.RunnerAgentLabel}
 	logPath, err := agent.LogPath()
 	if err != nil {
 		return fmt.Errorf("failed to determine log path: %w", err)
@@ -314,7 +314,7 @@ func (rl *RunnerDisableOptions) Run() error {
 		return fmt.Errorf("runner disable not supported on %s", runtime.GOOS)
 	}
 
-	agent := launchctl.Agent{Name: runnerAgentLabel}
+	agent := launchctl.Agent{Name: container.RunnerAgentLabel}
 	err := agent.Shutdown()
 	if err != nil {
 		return fmt.Errorf("failed to stop launchctl agent: %w", err)
