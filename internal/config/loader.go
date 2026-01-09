@@ -22,7 +22,7 @@ type Loader struct {
 	configPath string
 	cfg        atomic.Pointer[Config]
 	watchMu    sync.Mutex
-	watched    map[string]struct{}
+	watched    map[string]bool
 }
 
 func NewLoader(ctx context.Context, configPath string) (*Loader, error) {
@@ -44,7 +44,7 @@ func NewLoader(ctx context.Context, configPath string) (*Loader, error) {
 		cg:         concurrency.NewContextGroup(),
 		watcher:    watcher,
 		configPath: absPath,
-		watched:    make(map[string]struct{}),
+		watched:    make(map[string]bool),
 	}
 
 	l.cfg.Store(&Config{})
@@ -144,7 +144,7 @@ func (l *Loader) ensureWatches() error {
 	l.watchMu.Lock()
 	defer l.watchMu.Unlock()
 
-	desired := make(map[string]struct{})
+	desired := make(map[string]bool)
 	dir := filepath.Dir(l.configPath)
 	parent := filepath.Dir(dir)
 	paths := []string{parent}
@@ -153,7 +153,7 @@ func (l *Loader) ensureWatches() error {
 	}
 
 	for _, p := range paths {
-		desired[p] = struct{}{}
+		desired[p] = true
 		info, err := os.Stat(p)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
@@ -178,7 +178,7 @@ func (l *Loader) ensureWatches() error {
 		if err != nil {
 			return fmt.Errorf("add watch for %s: %w", p, err)
 		}
-		l.watched[p] = struct{}{}
+		l.watched[p] = true
 	}
 
 	for p := range l.watched {
