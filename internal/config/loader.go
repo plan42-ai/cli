@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/pelletier/go-toml/v2"
@@ -46,8 +47,6 @@ func NewLoader(ctx context.Context, configPath string) (*Loader, error) {
 		configPath: absPath,
 		watched:    make(map[string]bool),
 	}
-
-	l.cfg.Store(&Config{})
 
 	err = l.load()
 	if err != nil {
@@ -107,11 +106,18 @@ func (l *Loader) watch() {
 	defer l.cg.Cancel()
 	defer l.cg.Done()
 	defer l.watcher.Close()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-l.cg.Context().Done():
 			return
+		case <-ticker.C:
+			err := l.ensureWatches()
+			if err != nil {
+				slog.ErrorContext(l.cg.Context(), "failed to update config watcher", "error", err)
+			}
 		case err, ok := <-l.watcher.Errors:
 			if !ok {
 				return
@@ -146,11 +152,7 @@ func (l *Loader) ensureWatches() error {
 
 	desired := make(map[string]bool)
 	dir := filepath.Dir(l.configPath)
-	parent := filepath.Dir(dir)
-	paths := []string{parent}
-	if dir != parent {
-		paths = append(paths, dir)
-	}
+	paths := []string{dir}
 
 	for _, p := range paths {
 		desired[p] = true
@@ -163,7 +165,7 @@ func (l *Loader) ensureWatches() error {
 				}
 				continue
 			}
-			return fmt.Errorf("stat watch path %s: %w", p, err)
+			return fmt.Errorf("error accessing path '%s': %w", p, err)
 		}
 
 		if !info.IsDir() {
