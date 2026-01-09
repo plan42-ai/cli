@@ -34,7 +34,7 @@ func (o *Options) Process() error {
 		}
 	}
 
-	o.Loader, err = config.NewLoader(context.Background(), o.ConfigFile)
+	o.Loader, err = config.NewLoader(o.ConfigFile)
 	if err != nil {
 		return fmt.Errorf("failed to load config file: %w", err)
 	}

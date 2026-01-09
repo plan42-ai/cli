@@ -1,7 +1,6 @@
 package config
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -26,11 +25,7 @@ type Loader struct {
 	watched    map[string]bool
 }
 
-func NewLoader(ctx context.Context, configPath string) (*Loader, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
+func NewLoader(configPath string) (*Loader, error) {
 	absPath, err := filepath.Abs(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolve config path: %w", err)
@@ -62,16 +57,6 @@ func NewLoader(ctx context.Context, configPath string) (*Loader, error) {
 
 	l.cg.Add(1)
 	go l.watch()
-
-	l.cg.Add(1)
-	go func() {
-		defer l.cg.Done()
-		select {
-		case <-ctx.Done():
-			l.cg.Cancel()
-		case <-l.cg.Context().Done():
-		}
-	}()
 
 	return l, nil
 }
