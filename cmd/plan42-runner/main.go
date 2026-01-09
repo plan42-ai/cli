@@ -29,7 +29,11 @@ func main() {
 		slog.Error("error processing options", "error", err)
 		panic(util.ExitCode(1))
 	}
-	tokenID, runnerID, err := extractParamsFromToken(options.Config.Runner.RunnerToken)
+	defer util.Close(options.Loader)
+
+	cfg := options.Loader.Current()
+
+	tokenID, runnerID, err := extractParamsFromToken(cfg.Runner.RunnerToken)
 	if err != nil {
 		slog.Error("error extracting params from token", "error", err)
 		panic(util.ExitCode(2))

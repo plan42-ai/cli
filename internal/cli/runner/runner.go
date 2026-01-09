@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
-	"github.com/pelletier/go-toml/v2"
 	"github.com/plan42-ai/cli/internal/config"
 	"github.com/plan42-ai/cli/internal/poller"
 	"github.com/plan42-ai/cli/internal/util"
@@ -17,7 +15,7 @@ type Options struct {
 	PlatformOptions
 	Ctx        context.Context `kong:"-"`
 	Client     *p42.Client     `kong:"-"`
-	Config     config.Config   `kong:"-"`
+	Loader     *config.Loader  `kong:"-"`
 	ConfigFile string          `help:"Path to config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
 }
 
@@ -36,36 +34,33 @@ func (o *Options) Process() error {
 		}
 	}
 
-	f, err := os.Open(o.ConfigFile)
+	o.Loader, err = config.NewLoader(context.Background(), o.ConfigFile)
 	if err != nil {
-		return fmt.Errorf("failed to open config file: %w", err)
-	}
-	defer util.Close(f)
-
-	decoder := toml.NewDecoder(f)
-	err = decoder.Decode(&o.Config)
-	if err != nil {
-		return fmt.Errorf("failed to parse config file: %w", err)
+		return fmt.Errorf("failed to load config file: %w", err)
 	}
 
-	if o.Config.Runner.RunnerToken == "" {
+	cfg := o.Loader.Current()
+
+	if cfg.Runner.RunnerToken == "" {
+		_ = o.Loader.Close()
 		return errors.New("runner token not specified")
 	}
 
-	if o.Config.Runner.URL == "" {
+	if cfg.Runner.URL == "" {
+		_ = o.Loader.Close()
 		return errors.New("endpoint URL not specified")
 	}
 
 	clientOptions := []p42.Option{
-		p42.WithAPIToken(o.Config.Runner.RunnerToken),
+		p42.WithAPIToken(cfg.Runner.RunnerToken),
 	}
 
-	if o.Config.Runner.URL == "https://localhost:7443" {
+	if cfg.Runner.URL == "https://localhost:7443" {
 		clientOptions = append(clientOptions, p42.WithInsecureSkipVerify())
 	}
 
 	o.Ctx = context.Background()
-	o.Client = p42.NewClient(o.Config.Runner.URL, clientOptions...)
+	o.Client = p42.NewClient(cfg.Runner.URL, clientOptions...)
 
 	return nil
 }
