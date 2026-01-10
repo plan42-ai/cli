@@ -24,12 +24,12 @@ func main() {
 	log.SetupTextLogging()
 	var options runner.Options
 	kong.Parse(&options)
+	defer util.Close(&options)
 	err := options.Process()
 	if err != nil {
 		slog.Error("error processing options", "error", err)
 		panic(util.ExitCode(1))
 	}
-	defer util.Close(options.Loader)
 
 	cfg := options.Loader.Current()
 

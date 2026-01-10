@@ -19,6 +19,13 @@ type Options struct {
 	ConfigFile string          `help:"Path to config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
 }
 
+func (o *Options) Close() error {
+	if o.Loader != nil {
+		return o.Loader.Close()
+	}
+	return nil
+}
+
 func (o *Options) PollerOptions() []poller.Option {
 	var ret []poller.Option
 	ret = o.PlatformOptions.PollerOptions(ret)
@@ -42,12 +49,10 @@ func (o *Options) Process() error {
 	cfg := o.Loader.Current()
 
 	if cfg.Runner.RunnerToken == "" {
-		_ = o.Loader.Close()
 		return errors.New("runner token not specified")
 	}
 
 	if cfg.Runner.URL == "" {
-		_ = o.Loader.Close()
 		return errors.New("endpoint URL not specified")
 	}
 
