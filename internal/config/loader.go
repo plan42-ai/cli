@@ -7,12 +7,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/concurrency"
 )
 
@@ -20,45 +20,49 @@ type Loader struct {
 	cg         *concurrency.ContextGroup
 	watcher    *fsnotify.Watcher
 	configPath string
+	watchDir   string
+	hasWatch   bool
 	cfg        atomic.Pointer[Config]
-	watchMu    sync.Mutex
-	watched    map[string]bool
 }
 
-func NewLoader(configPath string) (*Loader, error) {
+func NewLoader(configPath string) (loader *Loader, err error) {
+	defer func() {
+		if err != nil && loader != nil {
+			util.Close(loader)
+		}
+	}()
+
 	absPath, err := filepath.Abs(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("resolve config path: %w", err)
+		return nil, fmt.Errorf("unable to resolve config path: %w", err)
 	}
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		return nil, fmt.Errorf("create watcher: %w", err)
+		return nil, fmt.Errorf("unable to create watcher for config directory: %w", err)
 	}
 
-	l := &Loader{
+	loader = &Loader{
 		cg:         concurrency.NewContextGroup(),
 		watcher:    watcher,
 		configPath: absPath,
-		watched:    make(map[string]bool),
+		watchDir:   filepath.Dir(absPath),
 	}
 
-	err = l.load()
+	err = loader.load()
 	if err != nil {
-		_ = watcher.Close()
 		return nil, err
 	}
 
-	err = l.ensureWatches()
+	err = loader.ensureWatches()
 	if err != nil {
-		_ = watcher.Close()
 		return nil, err
 	}
 
-	l.cg.Add(1)
-	go l.watch()
+	loader.cg.Add(1)
+	go loader.watch()
 
-	return l, nil
+	return loader, nil
 }
 
 func (l *Loader) Current() *Config {
@@ -66,7 +70,16 @@ func (l *Loader) Current() *Config {
 }
 
 func (l *Loader) Close() error {
-	return l.cg.Close()
+	var err1, err2 error
+	if l.watcher != nil {
+		err1 = l.watcher.Close()
+	}
+
+	if l.cg != nil {
+		err2 = l.cg.Close()
+	}
+
+	return util.Coalesce(err1, err2)
 }
 
 func (l *Loader) load() error {
@@ -132,49 +145,32 @@ func (l *Loader) watch() {
 }
 
 func (l *Loader) ensureWatches() error {
-	l.watchMu.Lock()
-	defer l.watchMu.Unlock()
-
-	desired := make(map[string]bool)
-	dir := filepath.Dir(l.configPath)
-	paths := []string{dir}
-
-	for _, p := range paths {
-		desired[p] = true
-		info, err := os.Stat(p)
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				if _, ok := l.watched[p]; ok {
-					_ = l.watcher.Remove(p)
-					delete(l.watched, p)
-				}
-				continue
+	info, err := os.Stat(l.watchDir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			if l.hasWatch {
+				_ = l.watcher.Remove(l.watchDir)
+				l.hasWatch = false
 			}
-			return fmt.Errorf("error accessing path '%s': %w", p, err)
+			return nil
 		}
-
-		if !info.IsDir() {
-			return fmt.Errorf("watch path %s is not a directory", p)
-		}
-
-		if _, ok := l.watched[p]; ok {
-			continue
-		}
-
-		err = l.watcher.Add(p)
-		if err != nil {
-			return fmt.Errorf("add watch for %s: %w", p, err)
-		}
-		l.watched[p] = true
+		return fmt.Errorf("error accessing path '%s': %w", l.watchDir, err)
 	}
 
-	for p := range l.watched {
-		if _, ok := desired[p]; !ok {
-			_ = l.watcher.Remove(p)
-			delete(l.watched, p)
-		}
+	if !info.IsDir() {
+		return fmt.Errorf("watch path %s is not a directory", l.watchDir)
 	}
 
+	if l.hasWatch {
+		return nil
+	}
+
+	err = l.watcher.Add(l.watchDir)
+	if err != nil {
+		return fmt.Errorf("unable to create watcher for config directory: %w", err)
+	}
+
+	l.hasWatch = true
 	return nil
 }
 

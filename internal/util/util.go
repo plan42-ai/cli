@@ -35,6 +35,16 @@ func Deref[T any](p *T) T {
 	return *p
 }
 
+func Coalesce[T comparable](values ...T) T {
+	var zero T
+	for _, v := range values {
+		if v != zero {
+			return v
+		}
+	}
+	return zero
+}
+
 func DefaultRunnerConfigFileName() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
