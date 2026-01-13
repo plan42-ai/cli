@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/go-github/v81/github"
 	"github.com/google/uuid"
 	"github.com/plan42-ai/cli/internal/config"
 	"github.com/plan42-ai/cli/internal/util"
@@ -56,6 +57,8 @@ type Poller struct {
 	queueManagementBackoff *concurrency.Backoff
 	batchBackoff           *concurrency.Backoff
 	connectionIdx          map[string]*config.GithubInfo
+	githubClients          map[string]*github.Client
+	githubClientMu         sync.Mutex
 }
 
 func (p *Poller) scale() {
@@ -421,6 +424,8 @@ func (p *Poller) parseMessage(data []byte) (pollerMessage, error) {
 		target = &pollerInvokeAgentRequest{}
 	case messages.ListOrgsForGithubConnectionRequestMessage:
 		target = &pollerListOrgsForGithubConnectionRequest{}
+	case messages.SearchRepoRequestMessage:
+		target = &pollerSearchRepoRequest{}
 	default:
 		return nil, fmt.Errorf("unknown message type: %v", tmp.Type)
 	}
@@ -602,6 +607,7 @@ func New(client *p42.Client, tenantID string, runnerID string, options ...Option
 		runnerID:               runnerID,
 		queueManagementBackoff: concurrency.NewBackoff(10*time.Millisecond, 5*time.Second),
 		batchBackoff:           concurrency.NewBackoff(1*time.Millisecond, 50*time.Millisecond),
+		githubClients:          make(map[string]*github.Client),
 	}
 	for _, opt := range options {
 		opt(ret)
@@ -616,4 +622,34 @@ func WithConnectionIdx(idx map[string]*config.GithubInfo) Option {
 	return func(p *Poller) {
 		p.connectionIdx = idx
 	}
+}
+
+func (p *Poller) GetClientForConnectionID(connectionID string) (*github.Client, error) {
+	p.githubClientMu.Lock()
+	defer p.githubClientMu.Unlock()
+
+	client := p.githubClients[connectionID]
+	if client != nil {
+		return client, nil
+	}
+	if p.connectionIdx == nil {
+		return nil, fmt.Errorf("github connection index not configured")
+	}
+	cnn := p.connectionIdx[connectionID]
+	if cnn == nil {
+		return nil, fmt.Errorf("github connection %s not found", connectionID)
+	}
+	if cnn.Token == "" {
+		return nil, fmt.Errorf("missing github token for connection %s", connectionID)
+	}
+	client = github.NewClient(nil).WithAuthToken(cnn.Token)
+	if cnn.URL != "" && cnn.URL != defaultGithubURL {
+		configured, err := client.WithEnterpriseURLs(cnn.URL, cnn.URL)
+		if err != nil {
+			return nil, fmt.Errorf("unable to configure github client: %w", err)
+		}
+		client = configured
+	}
+	p.githubClients[connectionID] = client
+	return client, nil
 }

@@ -81,6 +81,8 @@ github.com/plan42-ai/openid v1.0.3 h1:6oX6qBO66O0CG5tPvJ5XCMlN145BYZMbQRiqjb0TY3
 github.com/plan42-ai/openid v1.0.3/go.mod h1:ktbyPnO2KweuE/oABJU1QsmyvNQCvQf9HdsFd/zIEzI=
 github.com/plan42-ai/sdk-go v1.0.18 h1:laxla62XBUYlZBOdA4XBglxBjvzAQEQesyLQjEG6OK4=
 github.com/plan42-ai/sdk-go v1.0.18/go.mod h1:Ea8JeqUdACahYwfgVCHZFMWbjFTxsjJ7lmGqkW69h64=
+github.com/plan42-ai/sdk-go v1.0.19 h1:ZC7Az56EGjvuiTcCR9IntMHfO9K2TCdjmMinLGg68o4=
+github.com/plan42-ai/sdk-go v1.0.19/go.mod h1:Ea8JeqUdACahYwfgVCHZFMWbjFTxsjJ7lmGqkW69h64=
 github.com/plan42-ai/sigv4util v1.0.3 h1:uH8mWg8fx0tC5T4XVYe8eH02A4Riww5KpuF6ZQl49s0=
 github.com/plan42-ai/sigv4util v1.0.3/go.mod h1:y+mhSjI8kFxq2kwyW4JGabL0+OERePvUI4KkwyUGyLQ=
 github.com/plan42-ai/xml v1.25.5-2 h1:j02UzCrpkgMP86bWQsTjJidIJdQ3enioJ3JxL1vpRhE=
