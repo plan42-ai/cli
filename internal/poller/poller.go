@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/plan42-ai/cli/internal/config"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/concurrency"
 	"github.com/plan42-ai/ecies"
@@ -54,6 +55,7 @@ type Poller struct {
 	runnerID               string
 	queueManagementBackoff *concurrency.Backoff
 	batchBackoff           *concurrency.Backoff
+	connectionIdx          map[string]*config.GithubInfo
 }
 
 func (p *Poller) scale() {
@@ -417,6 +419,8 @@ func (p *Poller) parseMessage(data []byte) (pollerMessage, error) {
 		target = &pollerPingRequest{}
 	case messages.InvokeAgentRequestMessage:
 		target = &pollerInvokeAgentRequest{}
+	case messages.ListOrgsForGithubConnectionRequestMessage:
+		target = &pollerListOrgsForGithubConnectionRequest{}
 	default:
 		return nil, fmt.Errorf("unknown message type: %v", tmp.Type)
 	}
@@ -606,4 +610,10 @@ func New(client *p42.Client, tenantID string, runnerID string, options ...Option
 	go ret.scale()
 	go ret.poll(qi)
 	return ret
+}
+
+func WithConnectionIdx(idx map[string]*config.GithubInfo) Option {
+	return func(p *Poller) {
+		p.connectionIdx = idx
+	}
 }

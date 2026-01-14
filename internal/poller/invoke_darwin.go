@@ -149,4 +149,11 @@ func (req *pollerInvokeAgentRequest) validateDockerImage() error {
 
 func (req *pollerInvokeAgentRequest) Init(p *Poller) {
 	req.ContainerPath = p.ContainerPath
+	if req.PrivateGithubConnectionID != nil {
+		cnn := p.connectionIdx[*req.PrivateGithubConnectionID]
+		if cnn != nil {
+			req.GithubToken = util.Pointer(cnn.Token)
+			req.GithubURL = util.Pointer(cnn.URL)
+		}
+	}
 }

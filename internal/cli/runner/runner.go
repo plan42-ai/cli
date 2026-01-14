@@ -15,14 +15,17 @@ import (
 
 type Options struct {
 	PlatformOptions
-	Ctx        context.Context `kong:"-"`
-	Client     *p42.Client     `kong:"-"`
-	Config     config.Config   `kong:"-"`
-	ConfigFile string          `help:"Path to config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
+	Ctx           context.Context               `kong:"-"`
+	Client        *p42.Client                   `kong:"-"`
+	Config        config.Config                 `kong:"-"`
+	ConfigFile    string                        `help:"Path to config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
+	ConnectionIdx map[string]*config.GithubInfo `kong:"-"` // indexes github config based on connection id.
 }
 
 func (o *Options) PollerOptions() []poller.Option {
-	var ret []poller.Option
+	ret := []poller.Option{
+		poller.WithConnectionIdx(o.ConnectionIdx),
+	}
 	ret = o.PlatformOptions.PollerOptions(ret)
 	return ret
 }
@@ -66,6 +69,11 @@ func (o *Options) Process() error {
 
 	o.Ctx = context.Background()
 	o.Client = p42.NewClient(o.Config.Runner.URL, clientOptions...)
+	o.ConnectionIdx = make(map[string]*config.GithubInfo)
+
+	for _, cnn := range o.Config.Github {
+		o.ConnectionIdx[cnn.ConnectionID] = cnn
+	}
 
 	return nil
 }
