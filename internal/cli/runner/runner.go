@@ -75,5 +75,10 @@ func (o *Options) Process() error {
 		o.ConnectionIdx[cnn.ConnectionID] = cnn
 	}
 
+	err = o.Init(o.Ctx)
+	if err != nil {
+		return fmt.Errorf("failed to start platform services: %w", err)
+	}
+
 	return nil
 }
