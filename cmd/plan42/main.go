@@ -50,7 +50,6 @@ type RunnerOptions struct {
 	Logs    RunnerLogsOptions    `cmd:"" help:"Show the logs of the plan42 runner service."`
 	Disable RunnerDisableOptions `cmd:"" help:"Disable the plan42 runner service."`
 	Job     RunnerJobOptions     `cmd:"" help:"Commands related to managing runner jobs."`
-	Jobs    RunnerJobsOptions    `cmd:"" help:"Commands related to managing runner jobs."`
 }
 
 func forwardToSibling(execName string, commandDepth int) error {
@@ -347,15 +346,18 @@ func (rl *RunnerDisableOptions) Run() error {
 	return nil
 }
 
-type RunnerJobsOptions struct {
-	Prune RunnerJobsPruneOptions `cmd:"" help:"Remove runner logs for completed jobs."`
+type RunnerJobOptions struct {
+	List  ListRunnerJobOptions  `cmd:"" help:"List local runner jobs."`
+	Kill  KillRunnerJobOptions  `cmd:"" help:"Kill a local runner job."`
+	Logs  RunnerJobLogsOptions  `cmd:"" help:"Show the logs of a runner job."`
+	Prune RunnerJobPruneOptions `cmd:"" help:"Remove runner logs for completed jobs."`
 }
 
-type RunnerJobsPruneOptions struct{}
+type RunnerJobPruneOptions struct{}
 
-func (r *RunnerJobsPruneOptions) Run() error {
+func (r *RunnerJobPruneOptions) Run() error {
 	if runtime.GOOS != darwin {
-		return fmt.Errorf("runner jobs prune not supported on %s", runtime.GOOS)
+		return fmt.Errorf("runner job prune not supported on %s", runtime.GOOS)
 	}
 
 	jobIDs, err := container.GetLocaJobIDs(context.Background())
@@ -371,12 +373,6 @@ func (r *RunnerJobsPruneOptions) Run() error {
 	}
 
 	return nil
-}
-
-type RunnerJobOptions struct {
-	List ListRunnerJobOptions `cmd:"" help:"List local runner jobs."`
-	Kill KillRunnerJobOptions `cmd:"" help:"Kill a local runner job."`
-	Logs RunnerJobLogsOptions `cmd:"" help:"Show the logs of a runner job."`
 }
 
 type ListRunnerJobOptions struct {
@@ -570,8 +566,8 @@ func main() {
 		err = options.Runner.Logs.Run()
 	case "runner disable":
 		err = options.Runner.Disable.Run()
-	case "runner jobs prune":
-		err = options.Runner.Jobs.Prune.Run()
+	case "runner job prune":
+		err = options.Runner.Job.Prune.Run()
 	case "runner job list":
 		err = options.Runner.Job.List.Run()
 	case "runner job kill <job-id>":
