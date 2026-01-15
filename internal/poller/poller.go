@@ -217,9 +217,10 @@ func (p *Poller) poll(qi *queueInfo) {
 	defer p.deleteQueue(qi)
 
 	req := p42.GetMessagesBatchRequest{
-		TenantID: p.tenantID,
-		RunnerID: p.runnerID,
-		QueueID:  qi.queueID,
+		TenantID:       p.tenantID,
+		RunnerID:       p.runnerID,
+		QueueID:        qi.queueID,
+		MaxWaitSeconds: util.Pointer(30),
 	}
 loop:
 	for {
