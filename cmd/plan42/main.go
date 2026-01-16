@@ -422,7 +422,13 @@ func (l *ListRunnerJobOptions) Run() error {
 	}
 
 	tenantID := token.Payload.Subject
-	client := p42.NewClient(token.Payload.Issuer.String(), p42.WithAPIToken(cfg.Runner.RunnerToken))
+	options := []p42.Option{
+		p42.WithAPIToken(cfg.Runner.RunnerToken),
+	}
+	if cfg.Runner.SkipSSLVerify {
+		options = append(options, p42.WithInsecureSkipVerify())
+	}
+	client := p42.NewClient(cfg.Runner.URL, options...)
 
 	jobs, err := container.GetLocalJobs(context.Background(), client, tenantID, l.Verbose, l.All)
 	if err != nil {

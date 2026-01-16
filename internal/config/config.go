@@ -1,8 +1,9 @@
 package config
 
 type Runner struct {
-	URL         string `toml:"URL"`
-	RunnerToken string `toml:"token"`
+	URL           string `toml:"url"`
+	RunnerToken   string `toml:"token"`
+	SkipSSLVerify bool   `toml:"skip_ssl_verify,omitempty"`
 }
 
 type GithubInfo struct {
