@@ -36,6 +36,8 @@ const (
 	connectionsSection      = "[github connections]"
 	maxConnectionFieldIndex = 1
 	maxRunnerFieldIndex     = 1
+	runnerTokenFieldIndex   = 0
+	runnerURLFieldIndex     = 1
 )
 
 var commentStyle = lipgloss.NewStyle().
@@ -270,7 +272,7 @@ func (m model) validateToken() tea.Msg {
 		return errors.New("invalid server url")
 	}
 
-	if parsedURL.Host == "localhost:7443" {
+	if m.cfg.Runner.SkipSSLVerify {
 		options = append(options, p42.WithInsecureSkipVerify())
 	}
 
@@ -356,9 +358,9 @@ func (m *model) getSelectedInput() *textinput.Model {
 	switch m.selectedSection {
 	case runnerSection:
 		switch m.selectedFieldIndex {
-		case 0:
+		case runnerTokenFieldIndex:
 			return &m.runnerToken
-		case 1:
+		case runnerURLFieldIndex:
 			return &m.severURL
 		}
 	case connectionsSection:
@@ -371,9 +373,9 @@ func (m *model) getTargetField() *string {
 	switch m.selectedSection {
 	case runnerSection:
 		switch m.selectedFieldIndex {
-		case 0:
+		case runnerTokenFieldIndex:
 			return &m.cfg.Runner.RunnerToken
-		case 1:
+		case runnerURLFieldIndex:
 			return &m.cfg.Runner.URL
 		}
 	case connectionsSection:
@@ -412,6 +414,9 @@ func (m *model) commitChanges() {
 	field := m.getTargetField()
 
 	if input != nil && field != nil {
+		if m.isRunnerURLSelected() && *field != input.Value() {
+			m.cfg.Runner.SkipSSLVerify = false
+		}
 		*field = input.Value()
 	}
 }
@@ -541,6 +546,10 @@ func (m *model) onUp(cmds []tea.Cmd) []tea.Cmd {
 	}
 	cmds = append(cmds, m.focusSelectedInput())
 	return cmds
+}
+
+func (m *model) isRunnerURLSelected() bool {
+	return m.selectedSection == runnerSection && m.selectedFieldIndex == runnerURLFieldIndex
 }
 
 func main() {

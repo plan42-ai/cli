@@ -63,7 +63,7 @@ func (o *Options) Process() error {
 		p42.WithAPIToken(o.Config.Runner.RunnerToken),
 	}
 
-	if o.Config.Runner.URL == "https://localhost:7443" {
+	if o.Config.Runner.SkipSSLVerify {
 		clientOptions = append(clientOptions, p42.WithInsecureSkipVerify())
 	}
 
