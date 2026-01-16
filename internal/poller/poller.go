@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -31,6 +33,7 @@ type queueInfo struct {
 	cancel     context.CancelFunc
 	drain      chan struct{}
 	draining   bool
+	skipDelete bool
 	privateKey *ecdsa.PrivateKey
 }
 
@@ -214,7 +217,7 @@ func (p *Poller) poll(qi *queueInfo) {
 	if err != nil {
 		return
 	}
-	defer p.deleteQueue(qi)
+	defer p.deleteQueueIfNeeded(qi)
 
 	req := p42.GetMessagesBatchRequest{
 		TenantID:       p.tenantID,
@@ -231,7 +234,10 @@ loop:
 			break loop
 		default:
 		}
-		p.doPoll(qi, &req)
+		_, stop := p.doPoll(qi, &req)
+		if stop {
+			return
+		}
 	}
 
 	p.markAsDraining(qi)
@@ -244,24 +250,34 @@ loop:
 			return
 		default:
 		}
-		n := p.doPoll(qi, &req)
+		n, stop := p.doPoll(qi, &req)
+		if stop {
+			return
+		}
 		if n == 0 && time.Since(startDrain) >= 30*time.Second {
 			return
 		}
 	}
 }
 
-func (p *Poller) doPoll(qi *queueInfo, req *p42.GetMessagesBatchRequest) int {
+func (p *Poller) doPoll(qi *queueInfo, req *p42.GetMessagesBatchRequest) (n int, stop bool) {
 	err := p.batchBackoff.WaitContext(qi.ctx)
 	if err != nil {
-		return 0
+		stop = true
+		return
 	}
 
 	batch, err := p.client.GetMessagesBatch(qi.ctx, req)
 	if err != nil {
+		var httpErr p42.HTTPError
+		if errors.As(err, &httpErr) && httpErr.Code() == http.StatusNotFound {
+			p.handleQueueNotFound(qi)
+			stop = true
+			return
+		}
 		slog.ErrorContext(p.ctx, "unable to get messages batch", "error", err)
 		p.batchBackoff.Backoff()
-		return 0
+		return
 	}
 
 	if len(batch.Messages) == 0 {
@@ -275,7 +291,8 @@ func (p *Poller) doPoll(qi *queueInfo, req *p42.GetMessagesBatchRequest) int {
 		p.cg.Add(1)
 		go p.processMessage(msg, qi)
 	}
-	return len(batch.Messages)
+	n = len(batch.Messages)
+	return
 }
 
 func (p *Poller) decreaseActualQueueCount() {
@@ -351,6 +368,40 @@ func (p *Poller) addStats(pct float64) {
 	defer p.mux.Unlock()
 	p.sumBatchPct += pct
 	p.nBatches++
+}
+
+func (p *Poller) handleQueueNotFound(qi *queueInfo) {
+	qi.skipDelete = true
+
+	p.mux.Lock()
+	defer p.mux.Unlock()
+
+	if qi.draining || qi.ctx.Err() != nil || p.nExpectedQueueCount == 0 {
+		slog.InfoContext(qi.ctx, "queue removed during shutdown; skipping replacement", "queue", qi.queueID)
+		return
+	}
+
+	idx := slices.Index(p.queues, qi)
+
+	if idx == -1 {
+		slog.WarnContext(qi.ctx, "unable to replace missing queue", "queue", qi.queueID)
+		return
+	}
+
+	p.nExpectedQueueCount--
+	p.queues = append(p.queues[:idx], p.queues[idx+1:]...)
+
+	replacement := createQueueInfo(p.cg.Context())
+	if replacement == nil {
+		slog.ErrorContext(qi.ctx, "unable to create replacement queue")
+		return
+	}
+
+	p.nExpectedQueueCount++
+	p.queues = append(p.queues, replacement)
+	p.cg.Add(1)
+	go p.poll(replacement)
+	slog.InfoContext(qi.ctx, "replaced missing queue", "oldQueue", qi.queueID, "newQueue", replacement.queueID)
 }
 
 func (p *Poller) processMessage(msg *p42.RunnerMessage, qi *queueInfo) {
@@ -453,6 +504,13 @@ func (p *Poller) ShutdownTimeout(timeout time.Duration) error {
 
 func (p *Poller) Close() error {
 	return p.cg.Close()
+}
+
+func (p *Poller) deleteQueueIfNeeded(qi *queueInfo) {
+	if qi.skipDelete {
+		return
+	}
+	p.deleteQueue(qi)
 }
 
 func (p *Poller) deleteQueue(qi *queueInfo) {
