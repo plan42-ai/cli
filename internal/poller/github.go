@@ -96,7 +96,7 @@ func (req *pollerListOrgsForGithubConnectionRequest) Process(ctx context.Context
 			return &messages.ListOrgsForGithubConnectionResponse{ErrorMessage: util.Pointer("unable to fetch data for github user")}
 		}
 		var items []string
-		if req.Search == nil || strings.HasPrefix(*user.Login, *req.Search) {
+		if req.Search == nil || strings.Contains(*user.Login, *req.Search) {
 			items = append(items, *user.Login)
 		}
 		return &messages.ListOrgsForGithubConnectionResponse{
@@ -115,7 +115,7 @@ func (req *pollerListOrgsForGithubConnectionRequest) Process(ctx context.Context
 	}
 	var orgNames []string
 	for _, org := range orgs {
-		if req.Search != nil && !strings.HasPrefix(*org.Login, *req.Search) {
+		if req.Search != nil && !strings.Contains(*org.Login, *req.Search) {
 			continue
 		}
 		orgNames = append(orgNames, *org.Login)
@@ -134,7 +134,7 @@ func (req *pollerListOrgsForGithubConnectionRequest) Process(ctx context.Context
 			slog.ErrorContext(ctx, "call to users.Get failed", "error", err)
 			return &messages.ListOrgsForGithubConnectionResponse{ErrorMessage: util.Pointer("unable to fetch data for github user")}
 		}
-		if req.Search == nil || strings.HasPrefix(*user.Login, *req.Search) {
+		if req.Search == nil || strings.Contains(*user.Login, *req.Search) {
 			orgNames = append(orgNames, *user.Login)
 		}
 	default:
