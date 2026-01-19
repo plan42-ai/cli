@@ -478,6 +478,8 @@ func (p *Poller) parseMessage(data []byte) (pollerMessage, error) {
 		target = &pollerListOrgsForGithubConnectionRequest{}
 	case messages.SearchRepoRequestMessage:
 		target = &pollerSearchRepoRequest{}
+	case messages.ListRepoBranchesRequestMessage:
+		target = &pollerListRepoBranchesRequest{}
 	default:
 		return nil, fmt.Errorf("unknown message type: %v", tmp.Type)
 	}
