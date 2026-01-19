@@ -13,11 +13,11 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/pelletier/go-toml/v2 v2.2.4
-	github.com/plan42-ai/concurrency v1.0.3
+	github.com/plan42-ai/concurrency v1.0.4
 	github.com/plan42-ai/ecies v1.0.3
 	github.com/plan42-ai/log v1.0.2
 	github.com/plan42-ai/openid v1.0.3
-	github.com/plan42-ai/sdk-go v1.0.19
+	github.com/plan42-ai/sdk-go v1.0.32
 	github.com/plan42-ai/xml v1.25.5-2
 	github.com/stretchr/testify v1.11.1
 )
@@ -33,7 +33,7 @@ require (
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.7.0 // indirect
 	github.com/clipperhouse/stringish v0.1.1 // indirect
-	github.com/clipperhouse/uax29/v2 v2.3.0 // indirect
+	github.com/clipperhouse/uax29/v2 v2.3.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/google/go-querystring v1.2.0 // indirect
@@ -43,7 +43,7 @@ require (
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
-	github.com/plan42-ai/clock v1.1.3 // indirect
+	github.com/plan42-ai/clock v1.1.4 // indirect
 	github.com/plan42-ai/sigv4util v1.0.3 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect

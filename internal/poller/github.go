@@ -2,10 +2,12 @@ package poller
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"strconv"
+	"strings"
 
 	"github.com/google/go-github/v81/github"
 	"github.com/plan42-ai/cli/internal/util"
@@ -14,8 +16,18 @@ import (
 
 const (
 	defaultGithubURL = "https://github.com"
-	maxResultsErrMsg = "maxResults must be between 1 and 100"
+	defaultPageSize  = 10
+	maxPageSize      = 100
 )
+
+var (
+	errMaxResultInvalid       = errors.New("maxResults must be between 1 and 100")
+	errInvalidPaginationToken = errors.New("invalid pagination token")
+)
+
+type ListOrgsPaginationKey struct {
+	Page *int `json:"Page,omitempty"`
+}
 
 type pollerListOrgsForGithubConnectionRequest struct {
 	messages.ListOrgsForGithubConnectionRequest
@@ -27,29 +39,75 @@ func (req *pollerListOrgsForGithubConnectionRequest) Init(p *Poller) {
 	req.client, req.err = p.GetClientForConnectionID(req.ConnectionID)
 }
 
+// ParsePagination parses MaxResults and Token into a key structure.
+// key should be a pointer to the pagination key struct.
+func ParsePagination[T any](maxResults *int, token *string, key *T) (int, error) {
+	limit := defaultPageSize
+	if maxResults != nil {
+		limit = *maxResults
+	}
+	if limit <= 0 || limit > maxPageSize {
+		return 0, errMaxResultInvalid
+	}
+	if token != nil {
+		b, err := base64.RawURLEncoding.DecodeString(*token)
+		if err != nil {
+			return 0, errInvalidPaginationToken
+		}
+		if err := json.Unmarshal(b, key); err != nil {
+			return 0, errInvalidPaginationToken
+		}
+	}
+	return limit, nil
+}
+
+func NextToken[T any](paginationKey *T) (*string, error) {
+	if paginationKey == nil {
+		return nil, nil
+	}
+	jsonBytes, err := json.Marshal(paginationKey)
+	if err != nil {
+		return nil, err
+	}
+	return util.Pointer(base64.RawURLEncoding.EncodeToString(jsonBytes)), nil
+}
+
 func (req *pollerListOrgsForGithubConnectionRequest) Process(ctx context.Context) messages.Message {
 	slog.InfoContext(ctx, "received ListOrgsForGithubConnectionRequest message", "connection_id", req.ConnectionID, "pagination_token", req.Token)
 	if req.err != nil {
 		slog.ErrorContext(ctx, "unable to initialize github client", "error", req.err, "connection_id", req.ConnectionID)
 		return &messages.ListOrgsForGithubConnectionResponse{ErrorMessage: util.Pointer(req.err.Error())}
 	}
-	maxResults, err := parseMaxResults(req.MaxResults)
+
+	var paginationKey ListOrgsPaginationKey
+	maxResults, err := ParsePagination(req.MaxResults, req.Token, &paginationKey)
 	if err != nil {
-		slog.ErrorContext(ctx, "invalid maxResults", "error", err)
+		slog.ErrorContext(ctx, "unable to parse pagination key", "error", err, "connection_id", req.ConnectionID)
 		return &messages.ListOrgsForGithubConnectionResponse{ErrorMessage: util.Pointer(err.Error())}
 	}
-	page := 1
-	if req.Token != nil {
-		page, err = strconv.Atoi(*req.Token)
-		if err != nil || page < 1 {
-			slog.ErrorContext(ctx, "invalid pagination token in request")
-			return &messages.ListOrgsForGithubConnectionResponse{ErrorMessage: util.Pointer("invalid pagination token")}
+
+	if req.Token == nil {
+		paginationKey.Page = util.Pointer(1)
+	}
+
+	if paginationKey.Page == nil {
+		user, _, err := req.client.Users.Get(ctx, "")
+		if err != nil {
+			return &messages.ListOrgsForGithubConnectionResponse{ErrorMessage: util.Pointer("unable to fetch data for github user")}
+		}
+		var items []string
+		if req.Search == nil || strings.Contains(*user.Login, *req.Search) {
+			items = append(items, *user.Login)
+		}
+		return &messages.ListOrgsForGithubConnectionResponse{
+			Items: items,
 		}
 	}
+
 	orgs, resp, err := req.client.Organizations.List(
 		ctx,
 		"",
-		&github.ListOptions{Page: page, PerPage: maxResults},
+		&github.ListOptions{Page: *paginationKey.Page, PerPage: maxResults},
 	)
 	if err != nil {
 		slog.ErrorContext(ctx, "call to organizations.List failed", "error", err)
@@ -57,15 +115,40 @@ func (req *pollerListOrgsForGithubConnectionRequest) Process(ctx context.Context
 	}
 	var orgNames []string
 	for _, org := range orgs {
+		if req.Search != nil && !strings.Contains(*org.Login, *req.Search) {
+			continue
+		}
 		orgNames = append(orgNames, *org.Login)
 	}
 	slog.InfoContext(ctx, "call to organizations.List succeeded", "n_orgs", len(orgNames))
-	var nextToken *string
-	if resp != nil && resp.NextPage != 0 {
-		next := strconv.Itoa(resp.NextPage)
-		nextToken = &next
+	var nextPaginationKey *ListOrgsPaginationKey
+
+	switch {
+	case resp != nil && resp.NextPage != 0:
+		nextPaginationKey = &ListOrgsPaginationKey{
+			Page: util.Pointer(resp.NextPage),
+		}
+	case len(orgNames) < maxResults:
+		user, _, err := req.client.Users.Get(ctx, "")
+		if err != nil {
+			slog.ErrorContext(ctx, "call to users.Get failed", "error", err)
+			return &messages.ListOrgsForGithubConnectionResponse{ErrorMessage: util.Pointer("unable to fetch data for github user")}
+		}
+		if req.Search == nil || strings.Contains(*user.Login, *req.Search) {
+			orgNames = append(orgNames, *user.Login)
+		}
+	default:
+		nextPaginationKey = &ListOrgsPaginationKey{}
 	}
-	return &messages.ListOrgsForGithubConnectionResponse{Items: orgNames, NextToken: nextToken}
+	nextToken, err := NextToken(nextPaginationKey)
+	if err != nil {
+		slog.ErrorContext(ctx, "unable to generate next pagination token", "error", err)
+		return &messages.ListOrgsForGithubConnectionResponse{ErrorMessage: util.Pointer("unable to generate pagination token")}
+	}
+	return &messages.ListOrgsForGithubConnectionResponse{
+		Items:     orgNames,
+		NextToken: nextToken,
+	}
 }
 
 type pollerSearchRepoRequest struct {
@@ -76,6 +159,10 @@ type pollerSearchRepoRequest struct {
 
 func (req *pollerSearchRepoRequest) Init(p *Poller) {
 	req.client, req.err = p.GetClientForConnectionID(req.ConnectionID)
+}
+
+type SearchRepoPaginationKey struct {
+	Page int
 }
 
 func (req *pollerSearchRepoRequest) Process(ctx context.Context) messages.Message {
@@ -101,24 +188,23 @@ func (req *pollerSearchRepoRequest) Process(ctx context.Context) messages.Messag
 		slog.ErrorContext(ctx, "missing search query", "connection_id", req.ConnectionID)
 		return &messages.SearchRepoResponse{ErrorMessage: util.Pointer("search query is required")}
 	}
-	limit, err := parseMaxResults(req.MaxResults)
+	var paginationKey SearchRepoPaginationKey
+	limit, err := ParsePagination(req.MaxResults, req.Token, &paginationKey)
+
 	if err != nil {
-		slog.ErrorContext(ctx, "invalid maxResults", "error", err)
+		slog.ErrorContext(ctx, "unable to parse pagination key", "error", err, "connection_id", req.ConnectionID)
 		return &messages.SearchRepoResponse{ErrorMessage: util.Pointer(err.Error())}
 	}
-	page := 1
-	if req.Token != nil {
-		page, err = strconv.Atoi(*req.Token)
-		if err != nil || page < 1 {
-			slog.ErrorContext(ctx, "invalid pagination token in request")
-			return &messages.SearchRepoResponse{ErrorMessage: util.Pointer("invalid pagination token")}
-		}
+
+	if req.Token == nil {
+		paginationKey.Page = 1
 	}
+
 	query := fmt.Sprintf("%s org:%s fork:true", req.Search, req.OrgName)
 	result, resp, searchErr := req.client.Search.Repositories(
 		ctx,
 		query,
-		&github.SearchOptions{ListOptions: github.ListOptions{Page: page, PerPage: limit}},
+		&github.SearchOptions{ListOptions: github.ListOptions{Page: paginationKey.Page, PerPage: limit}},
 	)
 	if searchErr != nil {
 		slog.ErrorContext(ctx, "github repository search failed", "error", searchErr)
@@ -128,20 +214,17 @@ func (req *pollerSearchRepoRequest) Process(ctx context.Context) messages.Messag
 	for _, repo := range result.Repositories {
 		repos = append(repos, *repo.FullName)
 	}
-	var nextToken *string
+	var nextPaginationKey *SearchRepoPaginationKey
 	if resp != nil && resp.NextPage != 0 {
-		next := strconv.Itoa(resp.NextPage)
-		nextToken = &next
+		nextPaginationKey = &SearchRepoPaginationKey{
+			Page: resp.NextPage,
+		}
+	}
+
+	nextToken, err := NextToken(nextPaginationKey)
+	if err != nil {
+		slog.ErrorContext(ctx, "unable to generate next pagination token", "error", err)
+		return &messages.SearchRepoResponse{ErrorMessage: util.Pointer("unable to generate pagination token")}
 	}
 	return &messages.SearchRepoResponse{Items: repos, NextToken: nextToken}
-}
-
-func parseMaxResults(requested *int) (int, error) {
-	if requested == nil {
-		return 10, nil
-	}
-	if *requested < 1 || *requested > 100 {
-		return 0, errors.New(maxResultsErrMsg)
-	}
-	return *requested, nil
 }
