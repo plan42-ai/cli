@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/go-github/v81/github"
 	"github.com/google/uuid"
 	"github.com/plan42-ai/cli/internal/config"
+	"github.com/plan42-ai/cli/internal/github"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/concurrency"
 	"github.com/plan42-ai/ecies"
@@ -703,13 +703,9 @@ func (p *Poller) GetClientForConnectionID(connectionID string) (*github.Client, 
 	if cnn.Token == "" {
 		return nil, fmt.Errorf("missing github token for connection %s", connectionID)
 	}
-	client = github.NewClient(nil).WithAuthToken(cnn.Token)
-	if cnn.URL != "" && cnn.URL != defaultGithubURL {
-		configured, err := client.WithEnterpriseURLs(cnn.URL, cnn.URL)
-		if err != nil {
-			return nil, fmt.Errorf("unable to configure github client: %w", err)
-		}
-		client = configured
+	client, err := github.NewClient(cnn.Token, cnn.URL)
+	if err != nil {
+		return nil, err
 	}
 	p.githubClients[connectionID] = client
 	return client, nil

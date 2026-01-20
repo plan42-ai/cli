@@ -17,9 +17,10 @@ require (
 	github.com/plan42-ai/ecies v1.0.3
 	github.com/plan42-ai/log v1.0.2
 	github.com/plan42-ai/openid v1.0.3
-	github.com/plan42-ai/sdk-go v1.0.32
+	github.com/plan42-ai/sdk-go v1.0.33
 	github.com/plan42-ai/xml v1.25.5-2
 	github.com/stretchr/testify v1.11.1
+	golang.org/x/oauth2 v0.34.0
 )
 
 require (
