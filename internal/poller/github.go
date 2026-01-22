@@ -9,15 +9,15 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/google/go-github/v81/github"
+	ghapi "github.com/google/go-github/v81/github"
+	"github.com/plan42-ai/cli/internal/github"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/sdk-go/p42/messages"
 )
 
 const (
-	defaultGithubURL = "https://github.com"
-	defaultPageSize  = 10
-	maxPageSize      = 100
+	defaultPageSize = 10
+	maxPageSize     = 100
 )
 
 var (
@@ -91,7 +91,7 @@ func (req *pollerListOrgsForGithubConnectionRequest) Process(ctx context.Context
 	}
 
 	if paginationKey.Page == nil {
-		user, _, err := req.client.Users.Get(ctx, "")
+		user, _, err := req.client.GetCurrentUser(ctx)
 		if err != nil {
 			return &messages.ListOrgsForGithubConnectionResponse{ErrorMessage: util.Pointer("unable to fetch data for github user")}
 		}
@@ -104,11 +104,7 @@ func (req *pollerListOrgsForGithubConnectionRequest) Process(ctx context.Context
 		}
 	}
 
-	orgs, resp, err := req.client.Organizations.List(
-		ctx,
-		"",
-		&github.ListOptions{Page: *paginationKey.Page, PerPage: maxResults},
-	)
+	orgs, resp, err := req.client.ListOrganizations(ctx, *paginationKey.Page, maxResults)
 	if err != nil {
 		slog.ErrorContext(ctx, "call to organizations.List failed", "error", err)
 		return &messages.ListOrgsForGithubConnectionResponse{ErrorMessage: util.Pointer(err.Error())}
@@ -129,7 +125,7 @@ func (req *pollerListOrgsForGithubConnectionRequest) Process(ctx context.Context
 			Page: util.Pointer(resp.NextPage),
 		}
 	case len(orgNames) < maxResults:
-		user, _, err := req.client.Users.Get(ctx, "")
+		user, _, err := req.client.GetCurrentUser(ctx)
 		if err != nil {
 			slog.ErrorContext(ctx, "call to users.Get failed", "error", err)
 			return &messages.ListOrgsForGithubConnectionResponse{ErrorMessage: util.Pointer("unable to fetch data for github user")}
@@ -201,10 +197,10 @@ func (req *pollerSearchRepoRequest) Process(ctx context.Context) messages.Messag
 	}
 
 	query := fmt.Sprintf("%s org:%s fork:true", req.Search, req.OrgName)
-	result, resp, searchErr := req.client.Search.Repositories(
+	result, resp, searchErr := req.client.SearchRepositories(
 		ctx,
 		query,
-		&github.SearchOptions{ListOptions: github.ListOptions{Page: paginationKey.Page, PerPage: limit}},
+		&ghapi.SearchOptions{ListOptions: ghapi.ListOptions{Page: paginationKey.Page, PerPage: limit}},
 	)
 	if searchErr != nil {
 		slog.ErrorContext(ctx, "github repository search failed", "error", searchErr)
@@ -277,11 +273,11 @@ func (req *pollerListRepoBranchesRequest) Process(ctx context.Context) messages.
 	if req.Token == nil {
 		paginationKey.Page = 1
 	}
-	branches, resp, err := req.client.Repositories.ListBranches(
+	branches, resp, err := req.client.ListBranches(
 		ctx,
 		req.OrgName,
 		req.RepoName,
-		&github.BranchListOptions{ListOptions: github.ListOptions{Page: paginationKey.Page, PerPage: limit}},
+		&ghapi.BranchListOptions{ListOptions: ghapi.ListOptions{Page: paginationKey.Page, PerPage: limit}},
 	)
 	if err != nil {
 		slog.ErrorContext(ctx, "github branch listing failed", "error", err)

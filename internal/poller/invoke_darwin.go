@@ -9,11 +9,14 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"reflect"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/plan42-ai/cli/internal/docker"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/log"
+	"github.com/plan42-ai/sdk-go/p42"
 	"github.com/plan42-ai/sdk-go/p42/messages"
 )
 
@@ -51,6 +54,12 @@ func (req *pollerInvokeAgentRequest) Process(ctx context.Context) messages.Messa
 		slog.Int("turn_index", req.Turn.TurnIndex),
 		slog.String("container_id", containerID),
 	)
+
+	err = req.fetchPRFeedbackIfNeeded(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to fetch feedback", "error", err)
+		return agentResponse(err)
+	}
 	slog.InfoContext(ctx, "pulling image")
 	output, err := req.pulContainer(ctx)
 	if err != nil {
@@ -147,6 +156,70 @@ func (req *pollerInvokeAgentRequest) validateDockerImage() error {
 	return nil
 }
 
+func (req *pollerInvokeAgentRequest) fetchPRFeedbackIfNeeded(ctx context.Context) error {
+	if req.FeedBack != nil || req.PrivateGithubConnectionID == nil {
+		return nil
+	}
+
+	if req.githubClient == nil {
+		return fmt.Errorf("github client not configured")
+	}
+
+	feedback := make(map[string][]messages.PRFeedback)
+
+	repoInfo := map[string]*p42.RepoInfo{}
+	if req.Task != nil && req.Task.RepoInfo != nil {
+		repoInfo = req.Task.RepoInfo
+	}
+
+	for orgRepo, info := range repoInfo {
+		if info == nil || info.PRNumber == nil {
+			continue
+		}
+		org, repo, err := splitRepoName(orgRepo)
+		if err != nil {
+			return err
+		}
+		fb, err := req.githubClient.GetPRFeedBack(ctx, org, repo, *info.PRNumber)
+		if err != nil {
+			return err
+		}
+		feedback[orgRepo] = fb
+	}
+
+	return setFeedback(&req.FeedBack, feedback)
+}
+
+func splitRepoName(name string) (string, string, error) {
+	parts := strings.SplitN(name, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("invalid repo name: %s", name)
+	}
+	return parts[0], parts[1], nil
+}
+
+func setFeedback(dst any, feedback map[string][]messages.PRFeedback) error {
+	v := reflect.ValueOf(dst)
+	if v.Kind() != reflect.Pointer || v.IsNil() {
+		return fmt.Errorf("feedback destination is not settable")
+	}
+	v = v.Elem()
+	switch v.Kind() {
+	case reflect.Map:
+		v.Set(reflect.ValueOf(feedback))
+		return nil
+	case reflect.Pointer:
+		ptrVal := reflect.ValueOf(&feedback)
+		if !ptrVal.Type().AssignableTo(v.Type()) {
+			return fmt.Errorf("unsupported feedback pointer type")
+		}
+		v.Set(ptrVal)
+		return nil
+	default:
+		return fmt.Errorf("unsupported feedback field type")
+	}
+}
+
 func (req *pollerInvokeAgentRequest) Init(p *Poller) {
 	req.ContainerPath = p.ContainerPath
 	if req.PrivateGithubConnectionID != nil {
@@ -154,6 +227,12 @@ func (req *pollerInvokeAgentRequest) Init(p *Poller) {
 		if cnn != nil {
 			req.GithubToken = util.Pointer(cnn.Token)
 			req.GithubURL = util.Pointer(cnn.URL)
+		}
+		client, err := p.GetClientForConnectionID(*req.PrivateGithubConnectionID)
+		if err != nil {
+			slog.Error("unable to initialize github client", "connection_id", *req.PrivateGithubConnectionID, "error", err)
+		} else {
+			req.githubClient = client
 		}
 	}
 }
