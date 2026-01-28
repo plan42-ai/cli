@@ -15,5 +15,5 @@ func (req *pollerInvokeAgentRequest) Process(_ context.Context) messages.Message
 
 func (req *pollerInvokeAgentRequest) Init(p *Poller) {
 	_ = p
-	// do nothing
+	req.client = req.client.WithAPIToken(req.AgentToken)
 }

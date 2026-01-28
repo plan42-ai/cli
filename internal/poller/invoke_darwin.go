@@ -54,22 +54,38 @@ func (req *pollerInvokeAgentRequest) Process(ctx context.Context) messages.Messa
 		slog.Int("turn_index", req.Turn.TurnIndex),
 		slog.String("container_id", containerID),
 	)
+	slog.InfoContext(ctx, "received invoke request")
 
-	err = req.fetchPRFeedbackIfNeeded(ctx)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to fetch feedback", "error", err)
-		return agentResponse(err)
+	go req.invokeAsync(ctx, containerID)
+	return &messages.InvokeAgentResponse{}
+}
+
+func (req *pollerInvokeAgentRequest) invokeAsync(ctx context.Context, containerID string) {
+	if req.shouldFetchPRFeedback() {
+		if err := req.updateTurnStatus(ctx, "Checking for PR Feedback"); err != nil {
+			slog.ErrorContext(ctx, "failed to update turn status", "status", "Checking for PR Feedback", "error", err)
+			return
+		}
+		if err := req.fetchPRFeedbackIfNeeded(ctx); err != nil {
+			slog.ErrorContext(ctx, "failed to fetch feedback", "error", err)
+			return
+		}
 	}
+
+	if err := req.updateTurnStatus(ctx, "Pulling Agent Image on Local Runner"); err != nil {
+		slog.ErrorContext(ctx, "failed to update turn status", "status", "Pulling Agent Image on Local Runner", "error", err)
+		return
+	}
+
 	slog.InfoContext(ctx, "pulling image")
 	output, err := req.pulContainer(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to pull image", "err", err, "output", output)
-		return agentResponse(err)
+		return
 	}
 
 	slog.InfoContext(ctx, "starting agent")
-	go req.runContainer(ctx, containerID)
-	return &messages.InvokeAgentResponse{}
+	req.runContainer(ctx, containerID)
 }
 
 func (req *pollerInvokeAgentRequest) pulContainer(ctx context.Context) (string, error) {
@@ -148,6 +164,31 @@ func (req *pollerInvokeAgentRequest) runContainer(ctx context.Context, container
 	}
 }
 
+func (req *pollerInvokeAgentRequest) shouldFetchPRFeedback() bool {
+	if req.FeedBack != nil || req.PrivateGithubConnectionID == nil {
+		return false
+	}
+	return req.Turn.TurnIndex > 1
+}
+
+func (req *pollerInvokeAgentRequest) updateTurnStatus(ctx context.Context, status string) error {
+	updated, err := req.client.UpdateTurn(
+		ctx,
+		&p42.UpdateTurnRequest{
+			TenantID:  req.Turn.TenantID,
+			TaskID:    req.Turn.TaskID,
+			TurnIndex: req.Turn.TurnIndex,
+			Version:   req.Turn.Version,
+			Status:    util.Pointer(status),
+		},
+	)
+	if err != nil {
+		return err
+	}
+	req.Turn = updated
+	return nil
+}
+
 func (req *pollerInvokeAgentRequest) validateDockerImage() error {
 	_, err := docker.ParseImageURI(req.Environment.DockerImage)
 	if err != nil {
@@ -222,6 +263,7 @@ func setFeedback(dst any, feedback map[string][]messages.PRFeedback) error {
 
 func (req *pollerInvokeAgentRequest) Init(p *Poller) {
 	req.ContainerPath = p.ContainerPath
+	req.client = p.client.WithAPIToken(req.AgentToken)
 	if req.PrivateGithubConnectionID != nil {
 		cnn := p.connectionIdx[*req.PrivateGithubConnectionID]
 		if cnn != nil {
