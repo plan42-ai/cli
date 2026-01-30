@@ -22,36 +22,36 @@ const (
 	runnerAgentLabel = "ai.plan42.runner"
 )
 
-// AppleProvider implements RuntimeProvider for Apple's container runtime.
-type AppleProvider struct {
+// Provider implements RuntimeProvider for Apple's container runtime.
+type Provider struct {
 	containerPath string
 }
 
-// NewAppleProvider creates a new AppleProvider with the given container binary path.
+// NewProvider creates a new Provider with the given container binary path.
 // If containerPath is empty, it defaults to "container".
-func NewAppleProvider(containerPath string) *AppleProvider {
+func NewProvider(containerPath string) *Provider {
 	if containerPath == "" {
 		containerPath = "container"
 	}
-	return &AppleProvider{
+	return &Provider{
 		containerPath: containerPath,
 	}
 }
 
 // Name returns the human-readable name of the runtime.
-func (p *AppleProvider) Name() string {
+func (p *Provider) Name() string {
 	return "apple"
 }
 
 // IsInstalled reports whether the container binary is available on the system.
-func (p *AppleProvider) IsInstalled() bool {
+func (p *Provider) IsInstalled() bool {
 	_, err := exec.LookPath(p.containerPath)
 	return err == nil
 }
 
 // Validate checks that the runtime is properly configured and functional.
-func (p *AppleProvider) Validate(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, p.containerPath, "--version")
+func (p *Provider) Validate(ctx context.Context) error {
+	cmd := exec.CommandContext(ctx, p.containerPath, "--version") //nolint:gosec // containerPath is controlled, not user input
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to validate Apple container runtime: %w", err)
 	}
@@ -59,8 +59,8 @@ func (p *AppleProvider) Validate(ctx context.Context) error {
 }
 
 // PullImage pulls the specified container image.
-func (p *AppleProvider) PullImage(ctx context.Context, image string) error {
-	cmd := exec.CommandContext(ctx, p.containerPath, "image", "pull", image)
+func (p *Provider) PullImage(ctx context.Context, image string) error {
+	cmd := exec.CommandContext(ctx, p.containerPath, "image", "pull", image) //nolint:gosec // containerPath is controlled, not user input
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to pull image %s: %w\n%s", image, err, string(output))
@@ -69,7 +69,7 @@ func (p *AppleProvider) PullImage(ctx context.Context, image string) error {
 }
 
 // RunJob runs a job with the specified options.
-func (p *AppleProvider) RunJob(ctx context.Context, opts runtime.JobOptions) error {
+func (p *Provider) RunJob(ctx context.Context, opts runtime.JobOptions) error {
 	args := []string{"run"}
 
 	if opts.CPUs > 0 {
@@ -92,7 +92,7 @@ func (p *AppleProvider) RunJob(ctx context.Context, opts runtime.JobOptions) err
 	args = append(args, opts.Image)
 	args = append(args, opts.Args...)
 
-	cmd := exec.CommandContext(ctx, p.containerPath, args...)
+	cmd := exec.CommandContext(ctx, p.containerPath, args...) //nolint:gosec // containerPath is controlled, not user input
 	cmd.Stdin = opts.Stdin
 
 	if opts.LogPath != "" {
@@ -112,12 +112,12 @@ func (p *AppleProvider) RunJob(ctx context.Context, opts runtime.JobOptions) err
 }
 
 // ListJobs returns all jobs managed by this runtime.
-func (p *AppleProvider) ListJobs(ctx context.Context) ([]*runtime.Job, error) {
+func (p *Provider) ListJobs(ctx context.Context) ([]*runtime.Job, error) {
 	jobs := make([]*runtime.Job, 0)
 	running := make(map[string]bool)
 
 	// Get running containers
-	output, err := exec.CommandContext(ctx, p.containerPath, "ls").Output()
+	output, err := exec.CommandContext(ctx, p.containerPath, "ls").Output() //nolint:gosec // containerPath is controlled
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}
@@ -154,7 +154,8 @@ func (p *AppleProvider) ListJobs(ctx context.Context) ([]*runtime.Job, error) {
 	// Also check completed jobs from logs
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return jobs, nil // return running jobs even if we can't get home dir
+		// Can't get home dir, just return running jobs
+		return jobs, nil //nolint:nilerr // intentionally returning partial results
 	}
 
 	logDir := filepath.Join(homeDir, "Library", "Logs", runnerAgentLabel)
@@ -185,8 +186,8 @@ func (p *AppleProvider) ListJobs(ctx context.Context) ([]*runtime.Job, error) {
 }
 
 // KillJob terminates the job with the given ID.
-func (p *AppleProvider) KillJob(ctx context.Context, jobID string) error {
-	cmd := exec.CommandContext(ctx, p.containerPath, "kill", jobID)
+func (p *Provider) KillJob(ctx context.Context, jobID string) error {
+	cmd := exec.CommandContext(ctx, p.containerPath, "kill", jobID) //nolint:gosec // containerPath is controlled
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to kill job %s: %w\n%s", jobID, err, string(output))

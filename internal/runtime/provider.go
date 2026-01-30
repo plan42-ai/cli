@@ -1,5 +1,5 @@
-// Package runtime defines interfaces for container runtime providers.
-// It enables the CLI to support multiple container runtimes (Apple container, Podman)
+// Package runtime defines interfaces for job runtime providers.
+// It enables the CLI to support multiple runtimes (Apple container, Podman)
 // through a common abstraction.
 package runtime
 
@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Provider defines the interface for container runtime implementations.
+// Provider defines the interface for job runtime implementations.
 // Each supported runtime (Apple container, Podman) must implement this interface.
 type Provider interface {
 	// Name returns the human-readable name of the runtime (e.g., "Apple", "Podman").
@@ -21,7 +21,7 @@ type Provider interface {
 	// Validate checks that the runtime is properly configured and functional.
 	Validate(ctx context.Context) error
 
-	// PullImage pulls the specified container image.
+	// PullImage pulls the specified image.
 	PullImage(ctx context.Context, image string) error
 
 	// RunJob runs a job with the specified options.
@@ -39,7 +39,7 @@ type JobOptions struct {
 	// JobID is the unique identifier for the job.
 	JobID string
 
-	// Image is the container image to run.
+	// Image is the image to run.
 	Image string
 
 	// CPUs specifies the number of CPUs to allocate.
@@ -48,7 +48,7 @@ type JobOptions struct {
 	// Memory specifies the memory limit (in bytes).
 	Memory int64
 
-	// Entrypoint overrides the container's default entrypoint.
+	// Entrypoint overrides the default entrypoint.
 	Entrypoint string
 
 	// Args are the arguments to pass to the entrypoint.
@@ -67,7 +67,7 @@ type JobOptions struct {
 	LogPath string
 }
 
-// Job represents a job managed by a runtime.
+// Job represents a container job managed by a runtime.
 type Job struct {
 	// CreatedDate is when the job was created.
 	CreatedDate time.Time
