@@ -21,6 +21,10 @@ func (p *PlatformOptions) PollerOptions(options []poller.Option) []poller.Option
 	)
 }
 
+func (p *PlatformOptions) GetContainerPath() string {
+	return p.ContainerPath
+}
+
 func (p *PlatformOptions) Init(ctx context.Context) error {
 	slog.InfoContext(ctx, "running `container system start`", "container_path", p.ContainerPath)
 	// #nosec G204: ContainerPath is a local configuration value under user control with limited scope.

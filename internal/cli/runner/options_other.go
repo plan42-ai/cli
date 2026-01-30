@@ -15,6 +15,10 @@ func (p *PlatformOptions) PollerOptions(options []poller.Option) []poller.Option
 	return options
 }
 
+func (p *PlatformOptions) GetContainerPath() string {
+	return ""
+}
+
 func (p *PlatformOptions) Init(_ context.Context) error {
 	return nil
 }

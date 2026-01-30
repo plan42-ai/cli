@@ -14,6 +14,7 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/plan42-ai/cli/internal/cli/runner"
 	"github.com/plan42-ai/cli/internal/poller"
+	"github.com/plan42-ai/cli/internal/runtime"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/log"
 	"github.com/plan42-ai/openid/jwt"
@@ -29,6 +30,18 @@ func main() {
 		slog.Error("error processing options", "error", err)
 		panic(util.ExitCode(1))
 	}
+
+	provider, err := createRuntimeProvider(options.Config.Runner.Runtime, &options)
+	if err != nil {
+		slog.Error("error creating runtime provider", "error", err)
+		panic(util.ExitCode(1))
+	}
+	if err := provider.Validate(context.Background()); err != nil {
+		slog.Error("runtime validation failed", "runtime", provider.Name(), "error", err)
+		panic(util.ExitCode(1))
+	}
+	slog.Info("runtime validation passed", "runtime", provider.Name())
+
 	tokenID, runnerID, err := extractParamsFromToken(options.Config.Runner.RunnerToken)
 	if err != nil {
 		slog.Error("error extracting params from token", "error", err)
@@ -67,4 +80,17 @@ func extractParamsFromToken(token string) (tokenID string, runnerID string, err 
 		return "", "", errors.New("invalid api token")
 	}
 	return parsedToken.Payload.Subject, *parsedToken.Payload.RunnerID, nil
+}
+
+func createRuntimeProvider(runtimeName string, options *runner.Options) (runtime.RuntimeProvider, error) {
+	switch runtimeName {
+	case "podman":
+		return runtime.NewPodmanProvider(), nil
+	case "apple":
+		return runtime.NewAppleProvider(options.GetContainerPath()), nil
+	case "":
+		return nil, errors.New("runtime not specified in config")
+	default:
+		return nil, fmt.Errorf("unknown runtime: %s", runtimeName)
+	}
 }
