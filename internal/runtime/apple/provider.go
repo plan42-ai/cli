@@ -68,8 +68,8 @@ func (p *AppleProvider) PullImage(ctx context.Context, image string) error {
 	return nil
 }
 
-// RunContainer runs a container with the specified options.
-func (p *AppleProvider) RunContainer(ctx context.Context, opts runtime.ContainerOptions) error {
+// RunJob runs a job with the specified options.
+func (p *AppleProvider) RunJob(ctx context.Context, opts runtime.JobOptions) error {
 	args := []string{"run"}
 
 	if opts.CPUs > 0 {
@@ -78,8 +78,8 @@ func (p *AppleProvider) RunContainer(ctx context.Context, opts runtime.Container
 	if opts.Memory > 0 {
 		args = append(args, "-m", formatMemory(opts.Memory))
 	}
-	if opts.ContainerID != "" {
-		args = append(args, "--name", opts.ContainerID)
+	if opts.JobID != "" {
+		args = append(args, "--name", opts.JobID)
 	}
 	if opts.Stdin != nil {
 		args = append(args, "-i")

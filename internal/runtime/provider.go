@@ -24,8 +24,8 @@ type Provider interface {
 	// PullImage pulls the specified container image.
 	PullImage(ctx context.Context, image string) error
 
-	// RunContainer runs a container with the specified options.
-	RunContainer(ctx context.Context, opts ContainerOptions) error
+	// RunJob runs a job with the specified options.
+	RunJob(ctx context.Context, opts JobOptions) error
 
 	// ListJobs returns all jobs managed by this runtime.
 	ListJobs(ctx context.Context) ([]*Job, error)
@@ -34,10 +34,10 @@ type Provider interface {
 	KillJob(ctx context.Context, jobID string) error
 }
 
-// ContainerOptions specifies the configuration for running a container.
-type ContainerOptions struct {
-	// ContainerID is the unique identifier for the container.
-	ContainerID string
+// JobOptions specifies the configuration for running a job.
+type JobOptions struct {
+	// JobID is the unique identifier for the job.
+	JobID string
 
 	// Image is the container image to run.
 	Image string
@@ -54,20 +54,20 @@ type ContainerOptions struct {
 	// Args are the arguments to pass to the entrypoint.
 	Args []string
 
-	// Stdin provides input to the container.
+	// Stdin provides input to the job.
 	Stdin io.Reader
 
-	// Stdout receives standard output from the container.
+	// Stdout receives standard output from the job.
 	Stdout io.Writer
 
-	// Stderr receives standard error from the container.
+	// Stderr receives standard error from the job.
 	Stderr io.Writer
 
-	// LogPath is the path where container logs should be written.
+	// LogPath is the path where job logs should be written.
 	LogPath string
 }
 
-// Job represents a container job managed by a runtime.
+// Job represents a job managed by a runtime.
 type Job struct {
 	// CreatedDate is when the job was created.
 	CreatedDate time.Time
