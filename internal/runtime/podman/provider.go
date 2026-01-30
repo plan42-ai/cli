@@ -94,7 +94,16 @@ func (p *Provider) PullImage(ctx context.Context, image string) error {
 }
 
 // RunContainer runs a container with the specified options.
+// Log files are written to ~/Library/Logs/ai.plan42.runner/{containerID}
+// to match the Apple container provider format.
 func (p *Provider) RunContainer(ctx context.Context, opts rt.ContainerOptions) error {
+	// Create log file matching Apple container format
+	logFile, err := p.createLogFile(opts.ContainerID)
+	if err != nil {
+		return fmt.Errorf("failed to create log file: %w", err)
+	}
+	defer logFile.Close()
+
 	args := []string{
 		"run",
 		"--cpus", strconv.Itoa(opts.CPUs),
@@ -113,10 +122,28 @@ func (p *Provider) RunContainer(ctx context.Context, opts rt.ContainerOptions) e
 
 	cmd := exec.CommandContext(ctx, p.podmanPath, args...)
 	cmd.Stdin = opts.Stdin
-	cmd.Stdout = opts.Stdout
-	cmd.Stderr = opts.Stderr
+	// Write both stdout and stderr to the log file (matching Apple container behavior)
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
 
 	return cmd.Run()
+}
+
+// createLogFile creates a log file for the container at the standard location.
+// The log path matches Apple container: ~/Library/Logs/ai.plan42.runner/{containerID}
+func (p *Provider) createLogFile(containerID string) (*os.File, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+
+	logDir := filepath.Join(homeDir, "Library", "Logs", logLabel)
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return nil, err
+	}
+
+	logPath := filepath.Join(logDir, containerID)
+	return os.Create(logPath)
 }
 
 // formatMemory converts bytes to a format Podman accepts (e.g., "8g").
