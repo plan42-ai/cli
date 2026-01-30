@@ -51,6 +51,7 @@ func (p *Provider) IsInstalled() bool {
 // Validate checks that Podman is properly configured and functional.
 func (p *Provider) Validate(ctx context.Context) error {
 	// Check that podman command works
+	// #nosec G204: podmanPath is a local configuration value under user control.
 	cmd := exec.CommandContext(ctx, p.podmanPath, "--version")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("podman --version failed: %w", err)
@@ -69,6 +70,7 @@ func (p *Provider) Validate(ctx context.Context) error {
 
 // validateMachineRunning checks that the Podman machine is running on macOS.
 func (p *Provider) validateMachineRunning(ctx context.Context) error {
+	// #nosec G204: podmanPath is a local configuration value under user control.
 	cmd := exec.CommandContext(ctx, p.podmanPath, "machine", "info", "--format", "{{.Host.MachineState}}")
 	output, err := cmd.Output()
 	if err != nil {
@@ -85,6 +87,7 @@ func (p *Provider) validateMachineRunning(ctx context.Context) error {
 
 // PullImage pulls the specified container image.
 func (p *Provider) PullImage(ctx context.Context, image string) error {
+	// #nosec G204: podmanPath is a local configuration value under user control.
 	cmd := exec.CommandContext(ctx, p.podmanPath, "pull", image)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -111,6 +114,7 @@ func (p *Provider) RunContainer(ctx context.Context, opts rt.ContainerOptions) e
 	args = append(args, opts.Image)
 	args = append(args, opts.Args...)
 
+	// #nosec G204: podmanPath is a local configuration value under user control.
 	cmd := exec.CommandContext(ctx, p.podmanPath, args...)
 	cmd.Stdin = opts.Stdin
 
@@ -168,6 +172,7 @@ func (p *Provider) ListJobs(ctx context.Context) ([]*rt.Job, error) {
 
 // listRunningContainers returns running Plan42 containers.
 func (p *Provider) listRunningContainers(ctx context.Context, running map[string]bool) ([]*rt.Job, error) {
+	// #nosec G204: podmanPath is a local configuration value under user control.
 	cmd := exec.CommandContext(ctx, p.podmanPath, "ps", "--format", "{{.Names}}")
 	output, err := cmd.Output()
 	if err != nil {
@@ -262,6 +267,7 @@ func buildJob(containerID string, isRunning bool) (*rt.Job, bool) {
 
 // KillJob terminates the job with the given ID.
 func (p *Provider) KillJob(ctx context.Context, jobID string) error {
+	// #nosec G204: podmanPath is a local configuration value under user control.
 	cmd := exec.CommandContext(ctx, p.podmanPath, "kill", jobID)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
