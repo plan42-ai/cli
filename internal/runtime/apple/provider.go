@@ -154,8 +154,7 @@ func (p *Provider) ListJobs(ctx context.Context) ([]*runtime.Job, error) {
 	// Also check completed jobs from logs
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		// Can't get home dir, just return running jobs
-		return jobs, nil //nolint:nilerr // intentionally returning partial results
+		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
 	logDir := filepath.Join(homeDir, "Library", "Logs", runnerAgentLabel)
@@ -164,7 +163,7 @@ func (p *Provider) ListJobs(ctx context.Context) ([]*runtime.Job, error) {
 		if errors.Is(dirErr, os.ErrNotExist) {
 			return jobs, nil
 		}
-		return jobs, nil // return running jobs even if log dir is inaccessible
+		return nil, fmt.Errorf("failed to read log directory: %w", dirErr)
 	}
 
 	for _, entry := range entries {
