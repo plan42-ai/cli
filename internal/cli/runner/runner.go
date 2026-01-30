@@ -9,6 +9,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"github.com/plan42-ai/cli/internal/config"
 	"github.com/plan42-ai/cli/internal/poller"
+	"github.com/plan42-ai/cli/internal/runtime"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/sdk-go/p42"
 )
@@ -57,6 +58,15 @@ func (o *Options) Process() error {
 
 	if o.Config.Runner.URL == "" {
 		return errors.New("endpoint URL not specified")
+	}
+
+	// Validate runtime is installed before accepting work
+	provider, err := runtime.NewProvider(o.Config.Runner.Runtime)
+	if err != nil {
+		return err
+	}
+	if err := provider.Validate(context.Background()); err != nil {
+		return fmt.Errorf("%s runtime validation failed: %w", provider.Name(), err)
 	}
 
 	clientOptions := []p42.Option{
