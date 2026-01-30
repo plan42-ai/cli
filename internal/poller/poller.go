@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/plan42-ai/cli/internal/config"
 	"github.com/plan42-ai/cli/internal/github"
+	"github.com/plan42-ai/cli/internal/runtime"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/concurrency"
 	"github.com/plan42-ai/ecies"
@@ -62,6 +63,7 @@ type Poller struct {
 	connectionIdx          map[string]*config.GithubInfo
 	githubClients          map[string]*github.Client
 	githubClientMu         sync.Mutex
+	provider               runtime.RuntimeProvider
 }
 
 func (p *Poller) scale() {
@@ -682,6 +684,12 @@ func New(client *p42.Client, tenantID string, runnerID string, options ...Option
 func WithConnectionIdx(idx map[string]*config.GithubInfo) Option {
 	return func(p *Poller) {
 		p.connectionIdx = idx
+	}
+}
+
+func WithRuntimeProvider(provider runtime.RuntimeProvider) Option {
+	return func(p *Poller) {
+		p.provider = provider
 	}
 }
 

@@ -11,10 +11,10 @@ import (
 type PlatformOptions struct {
 }
 
-func (p *PlatformOptions) PollerOptions(options []poller.Option) []poller.Option {
+func (p *PlatformOptions) PollerOptions(options []poller.Option, runtimeConfig string) []poller.Option {
 	return options
 }
 
-func (p *PlatformOptions) Init(_ context.Context) error {
+func (p *PlatformOptions) Init(_ context.Context, _ string) error {
 	return nil
 }

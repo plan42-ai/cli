@@ -26,7 +26,7 @@ func (o *Options) PollerOptions() []poller.Option {
 	ret := []poller.Option{
 		poller.WithConnectionIdx(o.ConnectionIdx),
 	}
-	ret = o.PlatformOptions.PollerOptions(ret)
+	ret = o.PlatformOptions.PollerOptions(ret, o.Config.Runner.Runtime)
 	return ret
 }
 
@@ -75,7 +75,7 @@ func (o *Options) Process() error {
 		o.ConnectionIdx[cnn.ConnectionID] = cnn
 	}
 
-	err = o.Init(o.Ctx)
+	err = o.Init(o.Ctx, o.Config.Runner.Runtime)
 	if err != nil {
 		return fmt.Errorf("failed to start platform services: %w", err)
 	}
