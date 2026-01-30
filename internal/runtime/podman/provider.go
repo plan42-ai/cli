@@ -119,16 +119,9 @@ func (p *Provider) RunContainer(ctx context.Context, opts rt.ContainerOptions) e
 	return cmd.Run()
 }
 
-// formatMemory converts bytes to a format Podman accepts (e.g., "8g").
+// formatMemory converts bytes to a format Podman accepts.
+// We use raw bytes to avoid rounding issues that could cause OOMs.
 func formatMemory(bytes int64) string {
-	gb := bytes / (1024 * 1024 * 1024)
-	if gb > 0 {
-		return fmt.Sprintf("%dg", gb)
-	}
-	mb := bytes / (1024 * 1024)
-	if mb > 0 {
-		return fmt.Sprintf("%dm", mb)
-	}
 	return fmt.Sprintf("%d", bytes)
 }
 
