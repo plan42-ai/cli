@@ -12,12 +12,6 @@ make test
 
 Fix any issues before committing.
 
-## Common Lint Issues
-
-- Stuttering type names (e.g., `runtime.RuntimeProvider` should be `runtime.Provider`)
-- Unused variables or imports
-- Missing error handling
-
 ## PR Requirements
 
 1. Code must compile (`make build`)
