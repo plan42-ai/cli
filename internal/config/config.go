@@ -4,6 +4,7 @@ type Runner struct {
 	URL           string `toml:"url"`
 	RunnerToken   string `toml:"token"`
 	SkipSSLVerify bool   `toml:"skip_ssl_verify,omitempty"`
+	Runtime       string `toml:"runtime"`
 }
 
 type GithubInfo struct {

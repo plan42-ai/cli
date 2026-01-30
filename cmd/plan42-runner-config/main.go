@@ -18,6 +18,8 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	runner_config "github.com/plan42-ai/cli/internal/cli/runnerconfig"
 	"github.com/plan42-ai/cli/internal/config"
+	"github.com/plan42-ai/cli/internal/tui"
+	"github.com/plan42-ai/cli/internal/tui/runtimeselector"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/openid/jwt"
 	"github.com/plan42-ai/sdk-go/p42"
@@ -29,15 +31,17 @@ const (
 	red                     = "#FF0000"
 	runnerSection           = "[runner]"
 	runnerTokenLabel        = "Plan42 Runner Token"
+	runnerRuntimeLabel      = "Execution Runtime"
 	serverURLLabel          = "Server URL"
 	saveButton              = "[OK]"
 	cancelButton            = "[Cancel]"
 	validatingTokenSection  = "Validating Token"
 	connectionsSection      = "[github connections]"
 	maxConnectionFieldIndex = 1
-	maxRunnerFieldIndex     = 1
+	maxRunnerFieldIndex     = 2
 	runnerTokenFieldIndex   = 0
 	runnerURLFieldIndex     = 1
+	runnerRuntimeFieldIndex = 2
 )
 
 var commentStyle = lipgloss.NewStyle().
@@ -79,12 +83,51 @@ var errorStyle = lipgloss.NewStyle().
 	Bold(true).
 	Foreground(lipgloss.Color(red))
 
+type TextInputControl struct {
+	*textinput.Model
+}
+
+func (t TextInputControl) Update(msg tea.Msg) tea.Cmd {
+	var cmd tea.Cmd
+	*t.Model, cmd = t.Model.Update(msg)
+	return cmd
+}
+
+func (t TextInputControl) View() string {
+	return t.Model.View()
+}
+
+func (t TextInputControl) Focus() tea.Cmd {
+	return t.Model.Focus()
+}
+
+func (t TextInputControl) Blur() {
+	t.Model.Blur()
+}
+
+func (t TextInputControl) Value() string {
+	return t.Model.Value()
+}
+
+func (t TextInputControl) SetValue(v string) {
+	t.Model.SetValue(v)
+}
+
+func (t TextInputControl) CanNavigateDown() bool {
+	return true
+}
+
+func (t TextInputControl) CanNavigateUp() bool {
+	return true
+}
+
 type model struct {
 	selectedSection      string
 	selectedSectionIndex int
 	selectedFieldIndex   int
 	runnerToken          textinput.Model
 	severURL             textinput.Model
+	runtime              runtimeselector.Model
 	spinner              spinner.Model
 	githubConnections    []*githubConnectionModel
 	cfg                  config.Config
@@ -98,6 +141,7 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m *model) triggerSave(cmds []tea.Cmd) []tea.Cmd {
+	m.commitChanges()
 	m.saveErr = nil
 	return append(cmds, m.save)
 }
@@ -142,7 +186,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	pField := m.getSelectedInput()
 	if pField != nil {
-		*pField, cmd = pField.Update(msg)
+		cmd = pField.Update(msg)
 	}
 
 	if m.selectedSection == validatingTokenSection {
@@ -181,6 +225,9 @@ func (m model) View() string {
 	b.WriteRune('\n')
 	b.WriteString(m.getFieldLabelStyle(runnerSection, 0, 1).Render(serverURLLabel))
 	b.WriteString(m.severURL.View())
+	b.WriteRune('\n')
+	b.WriteString(m.getFieldLabelStyle(runnerSection, 0, 2).Render(runnerRuntimeLabel))
+	b.WriteString(m.runtime.View())
 	b.WriteRune('\n')
 
 	if m.validateErr != nil {
@@ -354,19 +401,28 @@ func (m *model) save() tea.Msg {
 	return tea.Quit()
 }
 
-func (m *model) getSelectedInput() *textinput.Model {
+func (m *model) getSelectedInput() tui.Control {
 	switch m.selectedSection {
 	case runnerSection:
 		switch m.selectedFieldIndex {
 		case runnerTokenFieldIndex:
-			return &m.runnerToken
+			return asControl(&m.runnerToken)
 		case runnerURLFieldIndex:
-			return &m.severURL
+			return asControl(&m.severURL)
+		case runnerRuntimeFieldIndex:
+			return &m.runtime
 		}
+
 	case connectionsSection:
-		return m.githubConnections[m.selectedSectionIndex].getInput(m.selectedFieldIndex)
+		return asControl(m.githubConnections[m.selectedSectionIndex].getInput(m.selectedFieldIndex))
 	}
 	return nil
+}
+
+func asControl(t *textinput.Model) tui.Control {
+	return TextInputControl{
+		Model: t,
+	}
 }
 
 func (m *model) getTargetField() *string {
@@ -377,6 +433,8 @@ func (m *model) getTargetField() *string {
 			return &m.cfg.Runner.RunnerToken
 		case runnerURLFieldIndex:
 			return &m.cfg.Runner.URL
+		case runnerRuntimeFieldIndex:
+			return &m.cfg.Runner.Runtime
 		}
 	case connectionsSection:
 		entry := m.cfg.Github[m.githubConnections[m.selectedSectionIndex].name.Value()]
@@ -481,6 +539,10 @@ func (m *model) onKey(msg tea.KeyMsg, cmds []tea.Cmd) []tea.Cmd {
 }
 
 func (m *model) onDown(cmds []tea.Cmd) []tea.Cmd {
+	selected := m.getSelectedInput()
+	if selected != nil && !selected.CanNavigateDown() {
+		return cmds
+	}
 	m.commitChanges()
 	m.blurSelectedInput()
 	switch m.selectedSection {
@@ -513,6 +575,10 @@ func (m *model) onDown(cmds []tea.Cmd) []tea.Cmd {
 }
 
 func (m *model) onUp(cmds []tea.Cmd) []tea.Cmd {
+	selected := m.getSelectedInput()
+	if selected != nil && !selected.CanNavigateUp() {
+		return cmds
+	}
 	m.commitChanges()
 	switch m.selectedSection {
 	case cancelButton, saveButton:
@@ -577,6 +643,7 @@ func initialModel(options *runner_config.Options) tea.Model {
 		selectedFieldIndex:   0,
 		runnerToken:          textinput.New(),
 		severURL:             textinput.New(),
+		runtime:              runtimeselector.New(),
 		spinner:              spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(spinnerStyle)),
 		options:              options,
 	}
@@ -591,6 +658,7 @@ func initialModel(options *runner_config.Options) tea.Model {
 	}
 	defer f.Close()
 	err = toml.NewDecoder(f).Decode(&ret.cfg)
+
 	if err != nil {
 		return ret
 	}
@@ -600,6 +668,9 @@ func initialModel(options *runner_config.Options) tea.Model {
 	}
 	ret.runnerToken.SetValue(ret.cfg.Runner.RunnerToken)
 	ret.severURL.SetValue(ret.cfg.Runner.URL)
+	if ret.cfg.Runner.Runtime != "" {
+		ret.runtime.SetValue(ret.cfg.Runner.Runtime)
+	}
 
 	return ret
 }

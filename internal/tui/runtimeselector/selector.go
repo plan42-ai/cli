@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/plan42-ai/cli/internal/tui"
 	"github.com/plan42-ai/cli/internal/tui/dropdown"
 )
 
@@ -83,11 +84,44 @@ type Model struct {
 	dropdown.Model
 }
 
-func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+func (m *Model) Focus() tea.Cmd {
+	m.Model.Focus()
+	return nil
+}
+
+func (m *Model) Value() string {
+	item := m.SelectedItem()
+	if item != nil {
+		return item.(Item).ConfigValue
+	}
+	return ""
+}
+
+func (m *Model) SetValue(v string) {
+	for index, item := range m.Items() {
+		if item.(Item).ConfigValue == v {
+			m.Select(index)
+			return
+		}
+	}
+	m.Select(0)
+}
+
+var _ tui.Control = (*Model)(nil)
+
+func (m *Model) Update(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 
 	m.Model, cmd = m.Model.Update(msg)
-	return m, cmd
+	return cmd
+}
+
+func (m *Model) CanNavigateUp() bool {
+	return !m.IsExpanded() || m.HighlightedIndex() == 0
+}
+
+func (m *Model) CanNavigateDown() bool {
+	return !m.IsExpanded() || m.HighlightedIndex() == len(m.Items())-1
 }
 
 func New() Model {

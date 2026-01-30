@@ -103,6 +103,7 @@ func (m *Model) Focus() {
 
 func (m *Model) Blur() {
 	m.focused = false
+	m.expanded = false
 }
 
 func (m *Model) Expand() {
@@ -143,6 +144,10 @@ func (m *Model) SetItems(items []Item) tea.Cmd {
 	items2 := narrow(items)
 	m.selectedIndex = 0
 	return m.list.SetItems(items2)
+}
+
+func (m *Model) Items() []list.Item {
+	return m.list.Items()
 }
 
 func narrow(items []Item) []list.Item {
@@ -234,6 +239,10 @@ func (m Model) chevron() string {
 		return expanded
 	}
 	return collapsed
+}
+
+func (m Model) IsExpanded() bool {
+	return m.expanded
 }
 
 func New(items []Item, delegate list.ItemDelegate, listWidth, listHeight int) Model {
