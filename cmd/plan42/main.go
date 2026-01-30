@@ -22,6 +22,7 @@ import (
 	runner_config "github.com/plan42-ai/cli/internal/cli/runnerconfig"
 	"github.com/plan42-ai/cli/internal/config"
 	"github.com/plan42-ai/cli/internal/launchctl"
+	p42runtime "github.com/plan42-ai/cli/internal/runtime"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/openid/jwt"
 	"github.com/plan42-ai/sdk-go/p42"
@@ -430,7 +431,15 @@ func (l *ListRunnerJobOptions) Run() error {
 	}
 	client := p42.NewClient(cfg.Runner.URL, options...)
 
-	jobs, err := container.GetLocalJobs(context.Background(), client, tenantID, l.Verbose, l.All)
+	provider, err := p42runtime.NewProvider(cfg.Runner.Runtime, client, tenantID)
+	if err != nil {
+		return fmt.Errorf("failed to create runtime provider: %w", err)
+	}
+
+	jobs, err := provider.ListJobs(context.Background(), p42runtime.ListJobsOptions{
+		All:     l.All,
+		Verbose: l.Verbose,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to list jobs: %w", err)
 	}
@@ -479,7 +488,7 @@ type JobWidths struct {
 	Created   int
 }
 
-func getJobWidths(jobs []*container.Job) JobWidths {
+func getJobWidths(jobs []*p42runtime.Job) JobWidths {
 	var ret JobWidths
 	ret.Running = max(len("true"), len("false"), len(runningColumn))
 	for _, job := range jobs {

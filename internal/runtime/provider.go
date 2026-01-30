@@ -5,8 +5,17 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"time"
+
+	"github.com/plan42-ai/sdk-go/p42"
+)
+
+// Runtime type constants.
+const (
+	RuntimeApple  = "apple"
+	RuntimePodman = "podman"
 )
 
 // Provider defines the interface for container runtime implementations.
@@ -28,7 +37,7 @@ type Provider interface {
 	RunContainer(ctx context.Context, opts ContainerOptions) error
 
 	// ListJobs returns all jobs managed by this runtime.
-	ListJobs(ctx context.Context) ([]*Job, error)
+	ListJobs(ctx context.Context, opts ListJobsOptions) ([]*Job, error)
 
 	// KillJob terminates the job with the given ID.
 	KillJob(ctx context.Context, jobID string) error
@@ -67,6 +76,15 @@ type ContainerOptions struct {
 	LogPath string
 }
 
+// ListJobsOptions configures how jobs are listed.
+type ListJobsOptions struct {
+	// All includes completed jobs in addition to running ones.
+	All bool
+
+	// Verbose enables verbose error logging.
+	Verbose bool
+}
+
 // Job represents a container job managed by a runtime.
 type Job struct {
 	// CreatedDate is when the job was created.
@@ -83,4 +101,21 @@ type Job struct {
 
 	// Running indicates whether the job is currently executing.
 	Running bool
+}
+
+// NewProvider creates a RuntimeProvider for the specified runtime type.
+// If runtimeType is empty, it defaults to Apple runtime.
+func NewProvider(runtimeType string, client *p42.Client, tenantID string) (RuntimeProvider, error) {
+	if runtimeType == "" {
+		runtimeType = RuntimeApple
+	}
+
+	switch runtimeType {
+	case RuntimeApple:
+		return NewAppleProvider(client, tenantID), nil
+	case RuntimePodman:
+		return nil, fmt.Errorf("podman runtime not yet implemented")
+	default:
+		return nil, fmt.Errorf("unknown runtime type: %s", runtimeType)
+	}
 }
