@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -121,6 +122,10 @@ func (t TextInputControl) CanNavigateUp() bool {
 	return true
 }
 
+type saveSuccessMsg struct {
+	changed bool
+}
+
 type model struct {
 	selectedSection      string
 	selectedSectionIndex int
@@ -131,6 +136,8 @@ type model struct {
 	spinner              spinner.Model
 	githubConnections    []*githubConnectionModel
 	cfg                  config.Config
+	originalConfigData   []byte
+	configSaved          bool
 	validateErr          error
 	saveErr              error
 	options              *runner_config.Options
@@ -180,6 +187,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case model:
 		m = msg
 		cmds = append(cmds, m.focusSelectedInput())
+	case saveSuccessMsg:
+		m.configSaved = msg.changed
+		return m, tea.Quit
 	}
 
 	var cmd tea.Cmd
@@ -398,7 +408,8 @@ func (m *model) save() tea.Msg {
 	if err != nil {
 		return fmt.Errorf("unable to save config file: %w", err)
 	}
-	return tea.Quit()
+	changed := !bytes.Equal(m.originalConfigData, fileData)
+	return saveSuccessMsg{changed: changed}
 }
 
 func (m *model) getSelectedInput() tui.Control {
@@ -629,10 +640,13 @@ func main() {
 	}
 
 	p := tea.NewProgram(initialModel(&options), tea.WithAltScreen())
-	_, err = p.Run()
+	finalModel, err := p.Run()
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "ERROR: %s\n", err)
 		panic(util.ExitCode(2))
+	}
+	if m, ok := finalModel.(model); ok && m.configSaved {
+		fmt.Println("Configuration updated. Run `plan42 runner enable` to restart the runner with the new config.")
 	}
 }
 
@@ -654,12 +668,14 @@ func initialModel(options *runner_config.Options) tea.Model {
 
 	f, err := os.Open(options.ConfigFile)
 	if err != nil {
+		ret.originalConfigData, _ = toml.Marshal(ret.cfg)
 		return ret
 	}
 	defer f.Close()
 	err = toml.NewDecoder(f).Decode(&ret.cfg)
 
 	if err != nil {
+		ret.originalConfigData, _ = toml.Marshal(ret.cfg)
 		return ret
 	}
 	for _, entry := range ret.cfg.Github {
@@ -672,6 +688,7 @@ func initialModel(options *runner_config.Options) tea.Model {
 		ret.runtime.SetValue(ret.cfg.Runner.Runtime)
 	}
 
+	ret.originalConfigData, _ = toml.Marshal(ret.cfg)
 	return ret
 }
 
