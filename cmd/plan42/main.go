@@ -145,25 +145,34 @@ func (r *RunnerEnableOptions) enableLaunchAgent(configPath string) error {
 	}
 	runnerPath := filepath.Join(execDir, "plan42-runner")
 
-	containerPath, err := exec.LookPath("container")
-	if err != nil {
-		return fmt.Errorf("unable to find `container` on path: %w", err)
-	}
-
 	_, err = os.Stat(runnerPath)
 	if err != nil {
 		return fmt.Errorf("unable to locate plan42-runner executable: %w", err)
 	}
 
+	cfg, err := readRunnerConfig(configPath)
+	if err != nil {
+		return err
+	}
+
+	argv := []string{
+		runnerPath,
+		"--config-file",
+		configPath,
+	}
+
+	// Add container path for Apple runtime (or default when runtime is not set)
+	if cfg.Runner.Runtime == "" || cfg.Runner.Runtime == "apple" {
+		containerPath, err := exec.LookPath("container")
+		if err == nil {
+			argv = append(argv, "--container-path", containerPath)
+		}
+		// If container not found, skip the parameter - runner will validate at startup
+	}
+
 	agent := launchctl.Agent{
-		Name: container.RunnerAgentLabel,
-		Argv: []string{
-			runnerPath,
-			"--config-file",
-			configPath,
-			"--container-path",
-			containerPath,
-		},
+		Name:        container.RunnerAgentLabel,
+		Argv:        argv,
 		ExitTimeout: util.Pointer(5 * time.Minute),
 		CreateLog:   true,
 	}
@@ -186,6 +195,22 @@ func (r *RunnerEnableOptions) enableLaunchAgent(configPath string) error {
 	}
 
 	return nil
+}
+
+func readRunnerConfig(configPath string) (*config.Config, error) {
+	f, err := os.Open(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open config file: %w", err)
+	}
+	defer util.Close(f)
+
+	var cfg config.Config
+	err = toml.NewDecoder(f).Decode(&cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode config file: %w", err)
+	}
+
+	return &cfg, nil
 }
 
 type RunnerConfigOptions struct {
