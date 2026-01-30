@@ -14,7 +14,7 @@ import (
 type PlatformOptions struct {
 	ContainerPath string `help:"Path to the container executable" default:"/opt/homebrew/bin/container"`
 	PodmanPath    string `help:"Path to the podman executable" default:"podman"`
-	provider      runtime.RuntimeProvider
+	provider      runtime.Provider
 }
 
 func (p *PlatformOptions) PollerOptions(options []poller.Option, runtimeConfig string) []poller.Option {
@@ -43,7 +43,7 @@ func (p *PlatformOptions) Init(ctx context.Context, runtimeConfig string) error 
 	p.initProvider(runtimeConfig)
 
 	// Only run system start for Apple containers
-	if runtimeConfig == "apple" || runtimeConfig == "" {
+	if _, isApple := p.provider.(*runtime.AppleProvider); isApple {
 		slog.InfoContext(ctx, "running `container system start`", "container_path", p.ContainerPath)
 		// #nosec G204: ContainerPath is a local configuration value under user control with limited scope.
 		cmd := exec.CommandContext(ctx, p.ContainerPath, "system", "start")

@@ -11,7 +11,7 @@ import (
 type PlatformOptions struct {
 }
 
-func (p *PlatformOptions) PollerOptions(options []poller.Option, runtimeConfig string) []poller.Option {
+func (p *PlatformOptions) PollerOptions(options []poller.Option, _ string) []poller.Option {
 	return options
 }
 

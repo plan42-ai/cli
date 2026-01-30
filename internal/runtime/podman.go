@@ -6,7 +6,7 @@ import (
 	"os/exec"
 )
 
-// PodmanProvider implements RuntimeProvider for Podman container runtime.
+// PodmanProvider implements Provider for Podman container runtime.
 type PodmanProvider struct {
 	// PodmanPath is the path to the podman CLI executable.
 	PodmanPath string

@@ -12,7 +12,7 @@ type PlatformFields struct {
 type InvokePlatformFields struct {
 	ContainerPath string
 	githubClient  *github.Client
-	provider      runtime.RuntimeProvider
+	provider      runtime.Provider
 }
 
 func WithContainerPath(path string) Option {

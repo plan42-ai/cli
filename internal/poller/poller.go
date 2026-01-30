@@ -63,7 +63,7 @@ type Poller struct {
 	connectionIdx          map[string]*config.GithubInfo
 	githubClients          map[string]*github.Client
 	githubClientMu         sync.Mutex
-	provider               runtime.RuntimeProvider
+	provider               runtime.Provider
 }
 
 func (p *Poller) scale() {
@@ -687,7 +687,7 @@ func WithConnectionIdx(idx map[string]*config.GithubInfo) Option {
 	}
 }
 
-func WithRuntimeProvider(provider runtime.RuntimeProvider) Option {
+func WithRuntimeProvider(provider runtime.Provider) Option {
 	return func(p *Poller) {
 		p.provider = provider
 	}

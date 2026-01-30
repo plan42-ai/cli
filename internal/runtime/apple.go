@@ -6,7 +6,7 @@ import (
 	"os/exec"
 )
 
-// AppleProvider implements RuntimeProvider for Apple's container runtime.
+// AppleProvider implements Provider for Apple's container runtime.
 type AppleProvider struct {
 	// ContainerPath is the path to the container CLI executable.
 	ContainerPath string

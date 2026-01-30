@@ -35,8 +35,8 @@ type ContainerOptions struct {
 	Stderr io.Writer
 }
 
-// RuntimeProvider abstracts container runtime operations.
-type RuntimeProvider interface {
+// Provider abstracts container runtime operations.
+type Provider interface {
 	// Name returns the name of the runtime provider (e.g., "Apple", "Podman").
 	Name() string
 
