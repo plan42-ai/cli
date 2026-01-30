@@ -113,8 +113,27 @@ func (p *Provider) RunContainer(ctx context.Context, opts rt.ContainerOptions) e
 
 	cmd := exec.CommandContext(ctx, p.podmanPath, args...)
 	cmd.Stdin = opts.Stdin
-	cmd.Stdout = opts.Stdout
-	cmd.Stderr = opts.Stderr
+
+	// Handle logging: if LogPath is set, write stdout/stderr to that file
+	if opts.LogPath != "" {
+		// Ensure the log directory exists
+		logDir := filepath.Dir(opts.LogPath)
+		if err := os.MkdirAll(logDir, 0755); err != nil {
+			return fmt.Errorf("failed to create log directory: %w", err)
+		}
+
+		logFile, err := os.Create(opts.LogPath)
+		if err != nil {
+			return fmt.Errorf("failed to create log file: %w", err)
+		}
+		defer logFile.Close()
+
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+	} else {
+		cmd.Stdout = opts.Stdout
+		cmd.Stderr = opts.Stderr
+	}
 
 	return cmd.Run()
 }
