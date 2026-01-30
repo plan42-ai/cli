@@ -4,4 +4,9 @@ plan42
 plan42-runner
 plan42-runner-config
 dist
+.beads/
 
+# Gas Town (added by gt)
+.runtime/
+.claude/
+.logs/
