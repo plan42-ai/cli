@@ -158,12 +158,12 @@ func (p *AppleProvider) ListJobs(ctx context.Context) ([]*runtime.Job, error) {
 	}
 
 	logDir := filepath.Join(homeDir, "Library", "Logs", runnerAgentLabel)
-	entries, dirErr := os.ReadDir(logDir)
-	if dirErr != nil {
-		if errors.Is(dirErr, os.ErrNotExist) {
-			return jobs, nil
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return jobs, nil // OK - no log dir yet
 		}
-		return jobs, nil // return running jobs even if log dir is inaccessible
+		return nil, fmt.Errorf("failed to read log directory: %w", err)
 	}
 
 	for _, entry := range entries {
