@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// RuntimeProvider defines the interface for container runtime implementations.
+// Provider defines the interface for container runtime implementations.
 // Each supported runtime (Apple container, Podman) must implement this interface.
-type RuntimeProvider interface {
+type Provider interface {
 	// Name returns the human-readable name of the runtime (e.g., "Apple", "Podman").
 	Name() string
 
