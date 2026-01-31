@@ -28,8 +28,8 @@ type Provider interface {
 	// KillJob terminates the job with the given ID.
 	KillJob(ctx context.Context, jobID string) error
 
-	// GetRunningContainerIDs returns IDs of all running containers managed by this runtime.
-	GetRunningContainerIDs(ctx context.Context) ([]string, error)
+	// GetRunningJobIDs returns IDs of all running jobs managed by this runtime.
+	GetRunningJobIDs(ctx context.Context) ([]string, error)
 	// GetCompletedJobIDs returns IDs of all completed jobs with log files.
 	GetCompletedJobIDs() ([]string, error)
 
