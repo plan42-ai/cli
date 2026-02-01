@@ -1,4 +1,4 @@
-package runtime
+package p42runtime
 
 import (
 	"context"
@@ -128,6 +128,38 @@ func sortJobs(jobs []*Job) {
 	})
 }
 
+// GetCompletedJobIDs returns IDs of jobs that have log files but are no longer running.
+// It computes this as: all job IDs with logs - running job IDs.
+func GetCompletedJobIDs(ctx context.Context, provider Provider) ([]string, error) {
+	// Get all job IDs (from log files)
+	allIDs, err := provider.GetAllJobIDs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all job IDs: %w", err)
+	}
+
+	// Get running job IDs
+	runningIDs, err := provider.GetRunningJobIDs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get running job IDs: %w", err)
+	}
+
+	// Build set of running IDs
+	running := make(map[string]bool)
+	for _, id := range runningIDs {
+		running[id] = true
+	}
+
+	// Filter out running jobs
+	var completedIDs []string
+	for _, id := range allIDs {
+		if !running[id] {
+			completedIDs = append(completedIDs, id)
+		}
+	}
+
+	return completedIDs, nil
+}
+
 // GetJobs returns a fully populated, sorted list of jobs.
 // It performs the following steps:
 // 1. Gets running job IDs from provider.
@@ -136,15 +168,22 @@ func sortJobs(jobs []*Job) {
 // 4. Sorts by CreatedDate (descending), TaskTitle, TaskID.
 func GetJobs(ctx context.Context, provider Provider, client *p42.Client, tenantID string, verbose bool, includeCompleted bool) ([]*Job, error) {
 	seen := make(map[string]bool)
-	jobs := make([]*Job, 0)
+	var jobs []*Job
+	var jobIDs []string
+	var err error
 
-	// Get running jobs
-	runningIDs, err := provider.GetRunningJobIDs(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get running jobs: %w", err)
+	if includeCompleted {
+		jobIDs, err = provider.GetAllJobIDs(ctx)
+	} else {
+		jobIDs, err = provider.GetRunningJobIDs(ctx)
 	}
 
-	for _, id := range runningIDs {
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch job IDs: %w", err)
+	}
+
+	// Get running jobs
+	for _, id := range jobIDs {
 		taskID, turnIndex, parseErr := parseJobID(id)
 		if parseErr != nil {
 			continue
@@ -157,34 +196,7 @@ func GetJobs(ctx context.Context, provider Provider, client *p42.Client, tenantI
 		})
 	}
 
-	// Get completed jobs if requested
-	if includeCompleted {
-		completedIDs, err := provider.GetCompletedJobIDs()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get completed jobs: %w", err)
-		}
-
-		for _, id := range completedIDs {
-			if seen[id] {
-				continue
-			}
-			taskID, turnIndex, parseErr := parseJobID(id)
-			if parseErr != nil {
-				continue
-			}
-			seen[id] = true
-			jobs = append(jobs, &Job{
-				TaskID:    taskID,
-				TurnIndex: turnIndex,
-				Running:   false,
-			})
-		}
-	}
-
-	// Fetch job data from API
 	fetchJobs(ctx, jobs, client, tenantID, verbose)
-
-	// Sort jobs
 	sortJobs(jobs)
 
 	return jobs, nil

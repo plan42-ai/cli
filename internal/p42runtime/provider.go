@@ -1,7 +1,7 @@
-// Package runtime defines interfaces for job runtime providers.
+// Package p42runtime defines interfaces for job runtime providers.
 // It enables the CLI to support multiple runtimes (Apple container, Podman)
 // through a common abstraction.
-package runtime
+package p42runtime
 
 import (
 	"context"
@@ -28,8 +28,8 @@ type Provider interface {
 
 	// GetRunningJobIDs returns IDs of all running jobs managed by this runtime.
 	GetRunningJobIDs(ctx context.Context) ([]string, error)
-	// GetCompletedJobIDs returns IDs of all completed jobs with log files.
-	GetCompletedJobIDs() ([]string, error)
+	// GetAllJobIDs returns IDs of all jobs with log files (both running and completed).
+	GetAllJobIDs(ctx context.Context) ([]string, error)
 
 	// ValidateJobID checks if the given job ID is valid for this runtime.
 	ValidateJobID(jobID string) error
