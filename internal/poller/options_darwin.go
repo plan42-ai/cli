@@ -1,18 +1,21 @@
 package poller
 
-import "github.com/plan42-ai/cli/internal/github"
+import (
+	"github.com/plan42-ai/cli/internal/github"
+	containerruntime "github.com/plan42-ai/cli/internal/runtime"
+)
 
 type PlatformFields struct {
-	ContainerPath string
+	runtimeProvider containerruntime.Provider
 }
 
 type InvokePlatformFields struct {
-	ContainerPath string
-	githubClient  *github.Client
+	runtimeProvider containerruntime.Provider
+	githubClient    *github.Client
 }
 
-func WithContainerPath(path string) Option {
+func WithRuntimeProvider(provider containerruntime.Provider) Option {
 	return func(p *Poller) {
-		p.ContainerPath = path
+		p.runtimeProvider = provider
 	}
 }

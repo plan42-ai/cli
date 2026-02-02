@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+const (
+	RuntimeApple     = "apple"
+	RuntimePodman    = "podman"
+	JobNamePrefix    = "plan42-"
+	RunnerAgentLabel = "ai.plan42.runner"
+)
+
 // Provider defines the interface for job runtime implementations.
 // Each supported runtime (Apple container, Podman) must implement this interface.
 type Provider interface {

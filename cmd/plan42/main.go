@@ -22,6 +22,9 @@ import (
 	runner_config "github.com/plan42-ai/cli/internal/cli/runnerconfig"
 	"github.com/plan42-ai/cli/internal/config"
 	"github.com/plan42-ai/cli/internal/launchctl"
+	containerruntime "github.com/plan42-ai/cli/internal/runtime"
+	appleruntime "github.com/plan42-ai/cli/internal/runtime/apple"
+	podmanruntime "github.com/plan42-ai/cli/internal/runtime/podman"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/openid/jwt"
 	"github.com/plan42-ai/sdk-go/p42"
@@ -91,12 +94,12 @@ func (r *RunnerEnableOptions) Run() error {
 		return err
 	}
 
-	err = validateRunnerConfig(configPath)
+	cfg, err := validateRunnerConfig(configPath)
 	if err != nil {
 		return err
 	}
 
-	return r.enableLaunchAgent(configPath)
+	return r.enableLaunchAgent(configPath, cfg)
 }
 
 func (r *RunnerEnableOptions) resolveConfigPath() (string, error) {
@@ -117,42 +120,93 @@ func (r *RunnerEnableOptions) resolveConfigPath() (string, error) {
 	return absPath, nil
 }
 
-func validateRunnerConfig(configPath string) error {
+func validateRunnerConfig(configPath string) (config.Config, error) {
+	var cfg config.Config
+
 	f, err := os.Open(configPath)
 	if err != nil {
-		return ErrRunnerNotConfigured
+		return cfg, ErrRunnerNotConfigured
 	}
 	defer util.Close(f)
 
 	decoder := toml.NewDecoder(f)
-	var cfg config.Config
 	err = decoder.Decode(&cfg)
 	if err != nil {
-		return ErrRunnerNotConfigured
+		return cfg, ErrRunnerNotConfigured
 	}
 
 	if cfg.Runner.RunnerToken == "" || cfg.Runner.URL == "" {
-		return ErrRunnerNotConfigured
+		return cfg, ErrRunnerNotConfigured
 	}
 
-	return nil
+	return cfg, nil
 }
 
-func (r *RunnerEnableOptions) enableLaunchAgent(configPath string) error {
+func runtimeArgsForConfig(cfg config.Config) ([]string, error) {
+	runtimeName := strings.ToLower(cfg.Runner.Runtime)
+	if runtimeName == "" {
+		runtimeName = containerruntime.RuntimeApple
+	}
+
+	switch runtimeName {
+	case containerruntime.RuntimeApple:
+		containerPath, _ := exec.LookPath("container")
+		if containerPath != "" {
+			return []string{"--container-path", containerPath}, nil
+		}
+		return nil, nil
+	case containerruntime.RuntimePodman:
+		podmanPath, _ := exec.LookPath("podman")
+		if podmanPath != "" {
+			return []string{"--podman-path", podmanPath}, nil
+		}
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("unsupported runtime: %s", runtimeName)
+	}
+}
+
+func runtimeProviderForConfig(cfg config.Config) (containerruntime.Provider, error) {
+	runtimeName := strings.ToLower(cfg.Runner.Runtime)
+	if runtimeName == "" {
+		runtimeName = containerruntime.RuntimeApple
+	}
+
+	switch runtimeName {
+	case containerruntime.RuntimeApple:
+		containerPath, _ := exec.LookPath("container")
+		provider := appleruntime.NewProvider(containerPath)
+		if provider.IsInstalled() {
+			return provider, nil
+		}
+		return nil, fmt.Errorf("apple container runtime is not installed on the local runner")
+	case containerruntime.RuntimePodman:
+		podmanPath, _ := exec.LookPath("podman")
+		provider := podmanruntime.NewProvider(podmanPath)
+		if provider.IsInstalled() {
+			return provider, nil
+		}
+		return nil, fmt.Errorf("podman is not installed on the local runner")
+	default:
+		return nil, fmt.Errorf("unsupported runtime: %s", runtimeName)
+	}
+}
+
+func (r *RunnerEnableOptions) enableLaunchAgent(configPath string, cfg config.Config) error {
 	execDir, err := util.ExecutableDir()
 	if err != nil {
 		return fmt.Errorf("unable to determine executable directory: %w", err)
 	}
 	runnerPath := filepath.Join(execDir, "plan42-runner")
 
-	containerPath, err := exec.LookPath("container")
-	if err != nil {
-		return fmt.Errorf("unable to find `container` on path: %w", err)
-	}
-
 	_, err = os.Stat(runnerPath)
 	if err != nil {
 		return fmt.Errorf("unable to locate plan42-runner executable: %w", err)
+	}
+
+	runtimeArgs, err := runtimeArgsForConfig(cfg)
+	if err != nil {
+		return err
 	}
 
 	agent := launchctl.Agent{
@@ -161,12 +215,11 @@ func (r *RunnerEnableOptions) enableLaunchAgent(configPath string) error {
 			runnerPath,
 			"--config-file",
 			configPath,
-			"--container-path",
-			containerPath,
 		},
 		ExitTimeout: util.Pointer(5 * time.Minute),
 		CreateLog:   true,
 	}
+	agent.Argv = append(agent.Argv, runtimeArgs...)
 	err = agent.Create()
 	if err != nil {
 		return err
@@ -360,14 +413,32 @@ func (r *RunnerJobPruneOptions) Run() error {
 		return fmt.Errorf("runner job prune not supported on %s", runtime.GOOS)
 	}
 
-	jobIDs, err := container.GetLocaJobIDs(context.Background())
+	configPath, err := util.DefaultRunnerConfigFileName()
+	if err != nil {
+		return err
+	}
+
+	cfg, err := validateRunnerConfig(configPath)
+	if err != nil {
+		return err
+	}
+
+	provider, err := runtimeProviderForConfig(cfg)
+	if err != nil {
+		return err
+	}
+
+	jobs, err := provider.ListJobs(context.Background())
 	if err != nil {
 		return fmt.Errorf("failed to list jobs: %w", err)
 	}
 
-	for _, jobID := range jobIDs {
-		err = container.DeleteJobLog(jobID)
-		if err != nil {
+	for _, job := range jobs {
+		if job.Running {
+			continue
+		}
+		jobID := containerruntime.FormatJobID(job)
+		if err := container.DeleteJobLog(jobID); err != nil {
 			return fmt.Errorf("failed to prune log for %s: %w", jobID, err)
 		}
 	}
@@ -430,10 +501,20 @@ func (l *ListRunnerJobOptions) Run() error {
 	}
 	client := p42.NewClient(cfg.Runner.URL, options...)
 
-	jobs, err := container.GetLocalJobs(context.Background(), client, tenantID, l.Verbose, l.All)
+	provider, err := runtimeProviderForConfig(cfg)
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	jobs, err := provider.ListJobs(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list jobs: %w", err)
 	}
+
+	jobs = containerruntime.FilterJobs(jobs, l.All)
+	containerruntime.PopulateJobDetails(ctx, client, tenantID, jobs, l.Verbose)
+	containerruntime.SortJobs(jobs)
 
 	widths := getJobWidths(jobs)
 	fmt.Printf(
@@ -457,7 +538,7 @@ func (l *ListRunnerJobOptions) Run() error {
 		fmt.Printf(
 			"%-*s     %-*s     %-*d     %-*v     %-*s\n",
 			widths.ID,
-			fmt.Sprintf("plan42-%v-%d", job.TaskID, job.TurnIndex),
+			containerruntime.FormatJobID(job),
 			widths.Title,
 			job.TaskTitle,
 			widths.TurnIndex,
@@ -479,13 +560,13 @@ type JobWidths struct {
 	Created   int
 }
 
-func getJobWidths(jobs []*container.Job) JobWidths {
+func getJobWidths(jobs []*containerruntime.Job) JobWidths {
 	var ret JobWidths
 	ret.Running = max(len("true"), len("false"), len(runningColumn))
 	for _, job := range jobs {
 		ret.ID = max(
 			ret.ID,
-			len(fmt.Sprintf("plan42-%v-%d", job.TaskID, job.TurnIndex)),
+			len(containerruntime.FormatJobID(job)),
 			len(jobIDColumn),
 		)
 		ret.Title = max(ret.Title, len(job.TaskTitle), len(titleColumn))
@@ -523,7 +604,7 @@ func runnerJobLogPath(jobID string) (string, error) {
 		return "", fmt.Errorf("failed to determine user home directory: %w", err)
 	}
 
-	return filepath.Join(homeDir, "Library", "Logs", container.RunnerAgentLabel, jobID), nil
+	return filepath.Join(homeDir, "Library", "Logs", containerruntime.RunnerAgentLabel, jobID), nil
 }
 
 type KillRunnerJobOptions struct {
@@ -540,7 +621,22 @@ func (k *KillRunnerJobOptions) Run() error {
 		return err
 	}
 
-	return container.KillJob(k.JobID)
+	configPath, err := util.DefaultRunnerConfigFileName()
+	if err != nil {
+		return err
+	}
+
+	cfg, err := validateRunnerConfig(configPath)
+	if err != nil {
+		return err
+	}
+
+	provider, err := runtimeProviderForConfig(cfg)
+	if err != nil {
+		return err
+	}
+
+	return provider.KillJob(context.Background(), k.JobID)
 }
 
 type Options struct {

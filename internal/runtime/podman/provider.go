@@ -1,5 +1,5 @@
-// Package apple implements the RuntimeProvider interface for Apple's container runtime.
-package apple
+// Package podman implements the runtime.Provider interface for Podman.
+package podman
 
 import (
 	"bufio"
@@ -14,53 +14,53 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/plan42-ai/cli/internal/runtime"
+	containerruntime "github.com/plan42-ai/cli/internal/runtime"
 )
 
 const (
-	containerPrefix  = runtime.JobNamePrefix
-	runnerAgentLabel = runtime.RunnerAgentLabel
+	containerPrefix  = containerruntime.JobNamePrefix
+	runnerAgentLabel = containerruntime.RunnerAgentLabel
 )
 
-// Provider implements RuntimeProvider for Apple's container runtime.
+// Provider implements runtime.Provider for Podman.
 type Provider struct {
-	containerPath string
+	podmanPath string
 }
 
-// NewProvider creates a new Provider with the given container binary path.
-// If containerPath is empty, it defaults to "container".
-func NewProvider(containerPath string) *Provider {
-	if containerPath == "" {
-		containerPath = "container"
+// NewProvider creates a new Provider with the given podman binary path.
+// If podmanPath is empty, it defaults to "podman".
+func NewProvider(podmanPath string) *Provider {
+	if podmanPath == "" {
+		podmanPath = "podman"
 	}
 	return &Provider{
-		containerPath: containerPath,
+		podmanPath: podmanPath,
 	}
 }
 
 // Name returns the human-readable name of the runtime.
 func (p *Provider) Name() string {
-	return runtime.RuntimeApple
+	return containerruntime.RuntimePodman
 }
 
-// IsInstalled reports whether the container binary is available on the system.
+// IsInstalled reports whether the podman binary is available on the system.
 func (p *Provider) IsInstalled() bool {
-	_, err := exec.LookPath(p.containerPath)
+	_, err := exec.LookPath(p.podmanPath)
 	return err == nil
 }
 
 // Validate checks that the runtime is properly configured and functional.
 func (p *Provider) Validate(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, p.containerPath, "--version") //nolint:gosec // containerPath is controlled, not user input
+	cmd := exec.CommandContext(ctx, p.podmanPath, "--version") //nolint:gosec // podmanPath is controlled
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to validate Apple container runtime: %w", err)
+		return fmt.Errorf("failed to validate Podman runtime: %w", err)
 	}
 	return nil
 }
 
 // PullImage pulls the specified container image.
 func (p *Provider) PullImage(ctx context.Context, image string) error {
-	cmd := exec.CommandContext(ctx, p.containerPath, "image", "pull", image) //nolint:gosec // containerPath is controlled, not user input
+	cmd := exec.CommandContext(ctx, p.podmanPath, "pull", image) //nolint:gosec // podmanPath is controlled
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to pull image %s: %w\n%s", image, err, string(output))
@@ -69,14 +69,14 @@ func (p *Provider) PullImage(ctx context.Context, image string) error {
 }
 
 // RunJob runs a job with the specified options.
-func (p *Provider) RunJob(ctx context.Context, opts runtime.JobOptions) error {
+func (p *Provider) RunJob(ctx context.Context, opts containerruntime.JobOptions) error {
 	args := []string{"run"}
 
 	if opts.CPUs > 0 {
-		args = append(args, "-c", strconv.Itoa(opts.CPUs))
+		args = append(args, "--cpus", strconv.Itoa(opts.CPUs))
 	}
 	if opts.Memory > 0 {
-		args = append(args, "-m", formatMemory(opts.Memory))
+		args = append(args, "--memory", formatMemory(opts.Memory))
 	}
 	if opts.JobID != "" {
 		args = append(args, "--name", opts.JobID)
@@ -92,7 +92,7 @@ func (p *Provider) RunJob(ctx context.Context, opts runtime.JobOptions) error {
 	args = append(args, opts.Image)
 	args = append(args, opts.Args...)
 
-	cmd := exec.CommandContext(ctx, p.containerPath, args...) //nolint:gosec // containerPath is controlled, not user input
+	cmd := exec.CommandContext(ctx, p.podmanPath, args...) //nolint:gosec // podmanPath is controlled
 	cmd.Stdin = opts.Stdin
 
 	if opts.LogPath != "" {
@@ -112,18 +112,16 @@ func (p *Provider) RunJob(ctx context.Context, opts runtime.JobOptions) error {
 }
 
 // ListJobs returns all jobs managed by this runtime.
-func (p *Provider) ListJobs(ctx context.Context) ([]*runtime.Job, error) {
-	jobs := make([]*runtime.Job, 0)
+func (p *Provider) ListJobs(ctx context.Context) ([]*containerruntime.Job, error) {
+	jobs := make([]*containerruntime.Job, 0)
 	running := make(map[string]bool)
 
-	// Get running containers
-	output, err := exec.CommandContext(ctx, p.containerPath, "ls").Output() //nolint:gosec // containerPath is controlled
+	output, err := exec.CommandContext(ctx, p.podmanPath, "ps", "--format", "{{.Names}}", "--filter", "name=^plan42-").Output() //nolint:gosec // podmanPath is controlled
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}
 
 	reader := bufio.NewReader(bytes.NewReader(output))
-	lineIndex := 0
 	for {
 		line, _, readErr := reader.ReadLine()
 		if errors.Is(readErr, io.EOF) {
@@ -132,17 +130,10 @@ func (p *Provider) ListJobs(ctx context.Context) ([]*runtime.Job, error) {
 		if readErr != nil {
 			return nil, readErr
 		}
-		lineIndex++
-		if lineIndex == 1 {
-			continue // skip header
-		}
-
-		fields := strings.Fields(string(line))
-		if len(fields) == 0 {
+		containerID := strings.TrimSpace(string(line))
+		if containerID == "" {
 			continue
 		}
-
-		containerID := fields[0]
 		job, ok := buildJob(containerID, true)
 		if !ok {
 			continue
@@ -151,7 +142,6 @@ func (p *Provider) ListJobs(ctx context.Context) ([]*runtime.Job, error) {
 		jobs = append(jobs, job)
 	}
 
-	// Also check completed jobs from logs
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
@@ -186,7 +176,7 @@ func (p *Provider) ListJobs(ctx context.Context) ([]*runtime.Job, error) {
 
 // KillJob terminates the job with the given ID.
 func (p *Provider) KillJob(ctx context.Context, jobID string) error {
-	cmd := exec.CommandContext(ctx, p.containerPath, "kill", jobID) //nolint:gosec // containerPath is controlled
+	cmd := exec.CommandContext(ctx, p.podmanPath, "kill", jobID) //nolint:gosec // podmanPath is controlled
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to kill job %s: %w\n%s", jobID, err, string(output))
@@ -195,7 +185,7 @@ func (p *Provider) KillJob(ctx context.Context, jobID string) error {
 }
 
 // buildJob parses a container ID into a Job struct.
-func buildJob(containerID string, running bool) (*runtime.Job, bool) {
+func buildJob(containerID string, running bool) (*containerruntime.Job, bool) {
 	if !strings.HasPrefix(containerID, containerPrefix) {
 		return nil, false
 	}
@@ -211,7 +201,7 @@ func buildJob(containerID string, running bool) (*runtime.Job, bool) {
 		return nil, false
 	}
 
-	return &runtime.Job{
+	return &containerruntime.Job{
 		TaskID:    trimmed[:idx],
 		TurnIndex: turnIndex,
 		Running:   running,

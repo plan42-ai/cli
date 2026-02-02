@@ -2,8 +2,12 @@
 
 package poller
 
-type PlatformFields struct {
-}
+import containerruntime "github.com/plan42-ai/cli/internal/runtime"
 
-type InvokePlatformFields struct {
+type PlatformFields struct{}
+
+type InvokePlatformFields struct{}
+
+func WithRuntimeProvider(_ containerruntime.Provider) Option {
+	return func(_ *Poller) {}
 }

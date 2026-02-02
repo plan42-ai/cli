@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/plan42-ai/cli/internal/config"
 	"github.com/plan42-ai/cli/internal/poller"
+	containerruntime "github.com/plan42-ai/cli/internal/runtime"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/sdk-go/p42"
 )
@@ -57,6 +59,15 @@ func (o *Options) Process() error {
 
 	if o.Config.Runner.URL == "" {
 		return errors.New("endpoint URL not specified")
+	}
+
+	runtimeName := strings.ToLower(o.Config.Runner.Runtime)
+	if runtimeName == "" {
+		runtimeName = containerruntime.RuntimeApple
+	}
+	err = o.ConfigureRuntime(runtimeName)
+	if err != nil {
+		return err
 	}
 
 	clientOptions := []p42.Option{
