@@ -18,3 +18,8 @@ func (p *PlatformOptions) PollerOptions(options []poller.Option) []poller.Option
 func (p *PlatformOptions) Init(_ context.Context) error {
 	return nil
 }
+
+func (p *PlatformOptions) SetupRuntime(runtimeName string) error {
+	_ = runtimeName
+	return nil
+}

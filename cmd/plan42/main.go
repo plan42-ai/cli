@@ -23,6 +23,7 @@ import (
 	"github.com/plan42-ai/cli/internal/launchctl"
 	"github.com/plan42-ai/cli/internal/p42runtime"
 	"github.com/plan42-ai/cli/internal/p42runtime/apple"
+	"github.com/plan42-ai/cli/internal/p42runtime/podman"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/openid/jwt"
 	"github.com/plan42-ai/sdk-go/p42"
@@ -40,6 +41,8 @@ const (
 	turnIndexColumn = "Turn Index"
 	runningColumn   = "Running?"
 	createdColumn   = "Created"
+	containerBinary = "container"
+	podmanBinary    = "podman"
 
 	// runnerAgentLabel is the launchctl agent label for the Plan42 runner service on macOS.
 	runnerAgentLabel = "ai.plan42.runner"
@@ -82,19 +85,26 @@ func loadConfig(configPath string) (*config.Config, error) {
 	return &cfg, nil
 }
 
+func normalizeRuntime(runtimeName string) string {
+	runtimeName = strings.ToLower(strings.TrimSpace(runtimeName))
+	if runtimeName == "" {
+		return p42runtime.RuntimeApple
+	}
+	return runtimeName
+}
+
 // createProvider creates a runtime provider based on the config.
 // Returns an error if the configured runtime is not supported.
 func createProvider(cfg *config.Config, logDir string) (p42runtime.Provider, error) {
-	runtimeName := cfg.Runner.Runtime
-	if runtimeName == "" {
-		runtimeName = "apple" // default to apple if not specified
-	}
+	runtimeName := normalizeRuntime(cfg.Runner.Runtime)
 
 	switch runtimeName {
-	case "apple":
+	case p42runtime.RuntimeApple:
 		return apple.NewProvider("", logDir), nil
+	case p42runtime.RuntimePodman:
+		return podman.NewProvider("", logDir), nil
 	default:
-		return nil, fmt.Errorf("unsupported runtime: %s (only 'apple' is currently supported)", runtimeName)
+		return nil, fmt.Errorf("unsupported runtime: %s (supported runtimes: apple, podman)", runtimeName)
 	}
 }
 
@@ -148,12 +158,12 @@ func (r *RunnerEnableOptions) Run() error {
 		return err
 	}
 
-	err = validateRunnerConfig(configPath)
+	cfg, err := validateRunnerConfig(configPath)
 	if err != nil {
 		return err
 	}
 
-	return r.enableLaunchAgent(configPath)
+	return r.enableLaunchAgent(configPath, cfg)
 }
 
 func (r *RunnerEnableOptions) resolveConfigPath() (string, error) {
@@ -174,10 +184,10 @@ func (r *RunnerEnableOptions) resolveConfigPath() (string, error) {
 	return absPath, nil
 }
 
-func validateRunnerConfig(configPath string) error {
+func validateRunnerConfig(configPath string) (*config.Config, error) {
 	f, err := os.Open(configPath)
 	if err != nil {
-		return ErrRunnerNotConfigured
+		return nil, ErrRunnerNotConfigured
 	}
 	defer util.Close(f)
 
@@ -185,42 +195,55 @@ func validateRunnerConfig(configPath string) error {
 	var cfg config.Config
 	err = decoder.Decode(&cfg)
 	if err != nil {
-		return ErrRunnerNotConfigured
+		return nil, ErrRunnerNotConfigured
 	}
 
 	if cfg.Runner.RunnerToken == "" || cfg.Runner.URL == "" {
-		return ErrRunnerNotConfigured
+		return nil, ErrRunnerNotConfigured
 	}
 
-	return nil
+	cfg.Runner.Runtime = normalizeRuntime(cfg.Runner.Runtime)
+	switch cfg.Runner.Runtime {
+	case p42runtime.RuntimeApple, p42runtime.RuntimePodman:
+	default:
+		return nil, fmt.Errorf("invalid runtime %q in runner config", cfg.Runner.Runtime)
+	}
+
+	return &cfg, nil
 }
 
-func (r *RunnerEnableOptions) enableLaunchAgent(configPath string) error {
+func (r *RunnerEnableOptions) enableLaunchAgent(configPath string, cfg *config.Config) error {
+	_ = cfg
 	execDir, err := util.ExecutableDir()
 	if err != nil {
 		return fmt.Errorf("unable to determine executable directory: %w", err)
 	}
 	runnerPath := filepath.Join(execDir, "plan42-runner")
 
-	containerPath, err := exec.LookPath("container")
-	if err != nil {
-		return fmt.Errorf("unable to find `container` on path: %w", err)
-	}
-
 	_, err = os.Stat(runnerPath)
 	if err != nil {
 		return fmt.Errorf("unable to locate plan42-runner executable: %w", err)
 	}
 
+	containerPath, _ := exec.LookPath(containerBinary)
+	podmanPath, _ := exec.LookPath(podmanBinary)
+
+	args := []string{
+		runnerPath,
+		"--config-file",
+		configPath,
+	}
+
+	if containerPath != "" {
+		args = append(args, "--container-path", containerPath)
+	}
+	if podmanPath != "" {
+		args = append(args, "--podman-path", podmanPath)
+	}
+
 	agent := launchctl.Agent{
-		Name: runnerAgentLabel,
-		Argv: []string{
-			runnerPath,
-			"--config-file",
-			configPath,
-			"--container-path",
-			containerPath,
-		},
+		Name:        runnerAgentLabel,
+		Argv:        args,
 		ExitTimeout: util.Pointer(5 * time.Minute),
 		CreateLog:   true,
 	}

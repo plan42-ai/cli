@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 	"github.com/plan42-ai/cli/internal/config"
+	"github.com/plan42-ai/cli/internal/p42runtime"
 	"github.com/plan42-ai/cli/internal/poller"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/sdk-go/p42"
@@ -59,6 +61,11 @@ func (o *Options) Process() error {
 		return errors.New("endpoint URL not specified")
 	}
 
+	runtimeName := normalizeRuntime(o.Config.Runner.Runtime)
+	if err := o.SetupRuntime(runtimeName); err != nil {
+		return fmt.Errorf("failed to configure runtime: %w", err)
+	}
+
 	clientOptions := []p42.Option{
 		p42.WithAPIToken(o.Config.Runner.RunnerToken),
 	}
@@ -81,4 +88,12 @@ func (o *Options) Process() error {
 	}
 
 	return nil
+}
+
+func normalizeRuntime(runtimeName string) string {
+	runtimeName = strings.ToLower(strings.TrimSpace(runtimeName))
+	if runtimeName == "" {
+		return p42runtime.RuntimeApple
+	}
+	return runtimeName
 }
