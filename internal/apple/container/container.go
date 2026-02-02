@@ -53,18 +53,38 @@ func GetLocalJobs(ctx context.Context, client *p42.Client, tenantID string, verb
 	jobs := make([]*Job, 0)
 	running := make(map[string]bool)
 
-	runningJobs, err := gatherRunningJobs(ctx, jobs, jobCh, running)
+	runningJobIDs, err := GetRunningJobIDs(ctx)
 	if err != nil {
 		return nil, err
 	}
-	jobs = runningJobs
+
+	for _, jobID := range runningJobIDs {
+		job, ok := buildJob(jobID, true)
+		if !ok {
+			continue
+		}
+		running[jobID] = true
+		jobs = append(jobs, job)
+		jobCh <- job
+	}
 
 	if all {
-		completedJobs, err := gatherCompletedJobs(jobs, running, jobCh)
+		allJobIDs, err := GetAllJobIDs()
 		if err != nil {
 			return nil, err
 		}
-		jobs = completedJobs
+		for _, jobID := range allJobIDs {
+			if running[jobID] {
+				continue
+			}
+			job, ok := buildJob(jobID, false)
+			if !ok {
+				continue
+			}
+			running[jobID] = true
+			jobs = append(jobs, job)
+			jobCh <- job
+		}
 	}
 
 	cleanup()
@@ -121,12 +141,13 @@ func worker(ctx context.Context, client *p42.Client, tenantID string, verbose bo
 	}
 }
 
-func gatherRunningJobs(ctx context.Context, jobs []*Job, jobCh chan<- *Job, running map[string]bool) ([]*Job, error) {
+func GetRunningJobIDs(ctx context.Context) ([]string, error) {
 	output, err := exec.CommandContext(ctx, "container", "ls").Output()
 	if err != nil {
 		return nil, err
 	}
 
+	jobIDs := make([]string, 0)
 	reader := bufio.NewReader(bytes.NewReader(output))
 	lineIndex := 0
 	for {
@@ -137,6 +158,7 @@ func gatherRunningJobs(ctx context.Context, jobs []*Job, jobCh chan<- *Job, runn
 		if readErr != nil {
 			return nil, readErr
 		}
+
 		lineIndex++
 		if lineIndex == 1 {
 			continue
@@ -148,19 +170,16 @@ func gatherRunningJobs(ctx context.Context, jobs []*Job, jobCh chan<- *Job, runn
 		}
 
 		containerID := fields[0]
-		job, ok := buildJob(containerID, true)
-		if !ok {
+		if _, ok := buildJob(containerID, true); !ok {
 			continue
 		}
-		running[containerID] = true
-		jobs = append(jobs, job)
-		jobCh <- job
+		jobIDs = append(jobIDs, containerID)
 	}
 
-	return jobs, nil
+	return jobIDs, nil
 }
 
-func gatherCompletedJobs(jobs []*Job, running map[string]bool, jobCh chan<- *Job) ([]*Job, error) {
+func GetAllJobIDs() ([]string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
@@ -170,29 +189,20 @@ func gatherCompletedJobs(jobs []*Job, running map[string]bool, jobCh chan<- *Job
 	entries, dirErr := os.ReadDir(logDir)
 	if dirErr != nil {
 		if errors.Is(dirErr, os.ErrNotExist) {
-			return jobs, nil
+			return nil, nil
 		}
-		return jobs, dirErr
+		return nil, dirErr
 	}
 
+	jobIDs := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
-		name := entry.Name()
-		if running[name] {
-			continue
-		}
-		job, ok := buildJob(name, false)
-		if !ok {
-			continue
-		}
-		running[name] = true
-		jobs = append(jobs, job)
-		jobCh <- job
+		jobIDs = append(jobIDs, entry.Name())
 	}
 
-	return jobs, nil
+	return jobIDs, nil
 }
 
 func sortJobs(jobs []*Job) {
@@ -279,69 +289,30 @@ func DeleteJobLog(jobID string) error {
 }
 
 func GetLocaJobIDs(ctx context.Context) ([]string, error) {
-	running := make(map[string]bool)
-	jobIDs := make([]string, 0)
-
-	output, err := exec.CommandContext(ctx, "container", "ls").Output()
+	runningJobIDs, err := GetRunningJobIDs(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	reader := bufio.NewReader(bytes.NewReader(output))
-	lineIndex := 0
-	for {
-		line, _, readErr := reader.ReadLine()
-		if errors.Is(readErr, io.EOF) {
-			break
-		}
-		if readErr != nil {
-			return nil, readErr
-		}
-
-		lineIndex++
-		if lineIndex == 1 {
-			continue
-		}
-
-		fields := strings.Fields(string(line))
-		if len(fields) == 0 {
-			continue
-		}
-
-		containerID := fields[0]
-		if _, ok := buildJob(containerID, true); !ok {
-			continue
-		}
-
-		running[containerID] = true
+	running := make(map[string]bool, len(runningJobIDs))
+	for _, jobID := range runningJobIDs {
+		running[jobID] = true
 	}
 
-	homeDir, err := os.UserHomeDir()
+	allJobIDs, err := GetAllJobIDs()
 	if err != nil {
 		return nil, err
 	}
 
-	logDir := filepath.Join(homeDir, "Library", "Logs", RunnerAgentLabel)
-	entries, dirErr := os.ReadDir(logDir)
-	if dirErr != nil {
-		if errors.Is(dirErr, os.ErrNotExist) {
-			return jobIDs, nil
-		}
-		return jobIDs, dirErr
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
+	jobIDs := make([]string, 0, len(allJobIDs))
+	for _, jobID := range allJobIDs {
+		if running[jobID] {
 			continue
 		}
-		name := entry.Name()
-		if running[name] {
+		if _, ok := buildJob(jobID, false); !ok {
 			continue
 		}
-		if _, ok := buildJob(name, false); !ok {
-			continue
-		}
-		jobIDs = append(jobIDs, name)
+		jobIDs = append(jobIDs, jobID)
 	}
 
 	sort.Strings(jobIDs)
