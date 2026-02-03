@@ -96,7 +96,7 @@ func (req *pollerInvokeAgentRequest) runContainer(ctx context.Context, container
 		JobID:      containerID,
 		Image:      req.Environment.DockerImage,
 		CPUs:       4,
-		Memory:     8,
+		MemoryInGB: 8,
 		Entrypoint: "/usr/bin/agent-wrapper",
 		Args: []string{
 			"--encrypted-input=false",
@@ -211,6 +211,7 @@ func setFeedback(dst any, feedback map[string][]messages.PRFeedback) error {
 
 func (req *pollerInvokeAgentRequest) Init(p *Poller) {
 	req.ContainerPath = p.ContainerPath
+	req.PodmanPath = p.PodmanPath
 	req.Provider = p.Provider
 	req.client = p.client.WithAPIToken(req.AgentToken)
 	if req.PrivateGithubConnectionID != nil {

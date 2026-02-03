@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+const (
+	RuntimeApple  = "apple"
+	RuntimePodman = "podman"
+)
+
 // Provider defines the interface for job runtime implementations.
 // Each supported runtime (Apple container, Podman) must implement this interface.
 type Provider interface {
@@ -43,7 +48,7 @@ type JobOptions struct {
 	JobID      string
 	Image      string
 	CPUs       int // Required. Number of CPUs to allocate.
-	Memory     int // Required. Memory in whole gigabytes.
+	MemoryInGB int // Required. Memory in whole gigabytes.
 	Entrypoint string
 	Args       []string
 	Stdin      io.Reader
