@@ -6,14 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
-	"os/exec"
-	"path"
 	"reflect"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/plan42-ai/cli/internal/docker"
+	"github.com/plan42-ai/cli/internal/p42runtime"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/log"
 	"github.com/plan42-ai/sdk-go/p42"
@@ -78,27 +76,13 @@ func (req *pollerInvokeAgentRequest) invokeAsync(ctx context.Context, containerI
 	}
 
 	slog.InfoContext(ctx, "pulling image")
-	output, err := req.pulContainer(ctx)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to pull image", "err", err, "output", output)
+	if err := req.Provider.PullImage(ctx, req.Environment.DockerImage); err != nil {
+		slog.ErrorContext(ctx, "failed to pull image", "error", err)
 		return
 	}
 
 	slog.InfoContext(ctx, "starting agent")
 	req.runContainer(ctx, containerID)
-}
-
-func (req *pollerInvokeAgentRequest) pulContainer(ctx context.Context) (string, error) {
-	// #nosec G204:  Subprocess launched with a potential tainted input or cmd arguments
-	output, err := exec.CommandContext(
-		ctx,
-		req.ContainerPath,
-		"image",
-		"pull",
-		req.Environment.DockerImage,
-	).CombinedOutput()
-
-	return string(output), err
 }
 
 func (req *pollerInvokeAgentRequest) runContainer(ctx context.Context, containerID string) {
@@ -108,55 +92,19 @@ func (req *pollerInvokeAgentRequest) runContainer(ctx context.Context, container
 		return
 	}
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to get user home dir", "error", err)
-		return
-	}
-
-	logPath := path.Join(
-		homeDir,
-		"Library",
-		"Logs",
-		"ai.plan42.runner",
-		containerID,
-	)
-
-	logFile, err := os.Create(logPath)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to create log file", "error", err)
-		return
-	}
-	defer util.Close(logFile)
-
-	// #nosec: G204: Subprocess launched with a potential tainted input or cmd arguments.
-	//    This is ok. There are 2 potentially tainted inputs:
-	//        - req.Environment.DockerImage:
-	//              We validate that this is a docker image url before calling this function
-	//        - containerID:
-	//              This is equal to "plan42/<task_id>/<turn_index>". We validate that task_is is a UUID
-	//              before calling this function, and turn_index is an integer value, which is verified
-	//              during JSON unmarshaling.
-	cmd := exec.CommandContext(
-		ctx,
-		req.ContainerPath,
-		"run",
-		"-c", "4",
-		"-m", "8G",
-		"--name", containerID,
-		"-i",
-		"--entrypoint", "/usr/bin/agent-wrapper",
-		"--rm",
-		req.Environment.DockerImage,
-		"--encrypted-input=false",
-		"--plan42-proxy",
-		"--log-agent-output",
-	)
-	cmd.Stdin = bytes.NewReader(jsonBytes)
-
-	cmd.Stderr = logFile
-	cmd.Stdout = logFile
-	err = cmd.Run()
+	err = req.Provider.RunJob(ctx, p42runtime.JobOptions{
+		JobID:      containerID,
+		Image:      req.Environment.DockerImage,
+		CPUs:       4,
+		Memory:     8,
+		Entrypoint: "/usr/bin/agent-wrapper",
+		Args: []string{
+			"--encrypted-input=false",
+			"--plan42-proxy",
+			"--log-agent-output",
+		},
+		Stdin: bytes.NewReader(jsonBytes),
+	})
 
 	if err != nil {
 		slog.ErrorContext(ctx, "container run failed", "error", err)
@@ -263,6 +211,7 @@ func setFeedback(dst any, feedback map[string][]messages.PRFeedback) error {
 
 func (req *pollerInvokeAgentRequest) Init(p *Poller) {
 	req.ContainerPath = p.ContainerPath
+	req.Provider = p.Provider
 	req.client = p.client.WithAPIToken(req.AgentToken)
 	if req.PrivateGithubConnectionID != nil {
 		cnn := p.connectionIdx[*req.PrivateGithubConnectionID]

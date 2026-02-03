@@ -17,11 +17,12 @@ import (
 	"github.com/google/shlex"
 	"github.com/mattn/go-isatty"
 	"github.com/pelletier/go-toml/v2"
-	"github.com/plan42-ai/cli/internal/apple/container"
 	"github.com/plan42-ai/cli/internal/cli/runner"
 	runner_config "github.com/plan42-ai/cli/internal/cli/runnerconfig"
 	"github.com/plan42-ai/cli/internal/config"
 	"github.com/plan42-ai/cli/internal/launchctl"
+	"github.com/plan42-ai/cli/internal/p42runtime"
+	"github.com/plan42-ai/cli/internal/p42runtime/apple"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/openid/jwt"
 	"github.com/plan42-ai/sdk-go/p42"
@@ -39,7 +40,63 @@ const (
 	turnIndexColumn = "Turn Index"
 	runningColumn   = "Running?"
 	createdColumn   = "Created"
+
+	// runnerAgentLabel is the launchctl agent label for the Plan42 runner service on macOS.
+	runnerAgentLabel = "ai.plan42.runner"
 )
+
+// jobLogDir returns the directory where job logs are stored.
+func jobLogDir() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to determine home directory: %w", err)
+	}
+	return filepath.Join(homeDir, "Library", "Logs", runnerAgentLabel), nil
+}
+
+// loadConfig loads the runner config from the given path.
+// If configPath is empty, it uses the default path (~/.config/plan42-runner.toml).
+func loadConfig(configPath string) (*config.Config, error) {
+	if configPath == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("failed to determine home directory: %w", err)
+		}
+		configPath = filepath.Join(homeDir, ".config", "plan42-runner.toml")
+	}
+
+	f, err := os.Open(configPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("runner config file %s does not exist. Run `plan42 runner config` to configure the runner", configPath)
+		}
+		return nil, fmt.Errorf("failed to open runner config file: %w", err)
+	}
+	defer f.Close()
+
+	var cfg config.Config
+	if err := toml.NewDecoder(f).Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("failed to decode runner config file: %w", err)
+	}
+
+	return &cfg, nil
+}
+
+// createProvider creates a runtime provider based on the config.
+// Returns an error if the configured runtime is not supported.
+func createProvider(cfg *config.Config, logDir string) (p42runtime.Provider, error) {
+	runtimeName := cfg.Runner.Runtime
+	if runtimeName == "" {
+		runtimeName = "apple" // default to apple if not specified
+	}
+
+	switch runtimeName {
+	case "apple":
+		return apple.NewProvider("", logDir), nil
+	default:
+		return nil, fmt.Errorf("unsupported runtime: %s (only 'apple' is currently supported)", runtimeName)
+	}
+}
 
 type RunnerOptions struct {
 	Config  RunnerConfigOptions  `cmd:"" help:"Edit the remote runner service config file."`
@@ -156,7 +213,7 @@ func (r *RunnerEnableOptions) enableLaunchAgent(configPath string) error {
 	}
 
 	agent := launchctl.Agent{
-		Name: container.RunnerAgentLabel,
+		Name: runnerAgentLabel,
 		Argv: []string{
 			runnerPath,
 			"--config-file",
@@ -204,7 +261,7 @@ func (rs *RunnerStopOptions) Run() error {
 	}
 
 	agent := launchctl.Agent{
-		Name: container.RunnerAgentLabel,
+		Name: runnerAgentLabel,
 	}
 	err := agent.Shutdown()
 	if err != nil {
@@ -220,7 +277,7 @@ func (rs *RunnerStatusOptions) Run() error {
 		return fmt.Errorf("runner status not supported on %s", runtime.GOOS)
 	}
 	agent := launchctl.Agent{
-		Name: container.RunnerAgentLabel,
+		Name: runnerAgentLabel,
 	}
 	output, err := agent.Status()
 
@@ -240,7 +297,7 @@ func (rl *RunnerLogsOptions) Run() error {
 		return fmt.Errorf("runner logs not supported on %s", runtime.GOOS)
 	}
 
-	agent := launchctl.Agent{Name: container.RunnerAgentLabel}
+	agent := launchctl.Agent{Name: runnerAgentLabel}
 	logPath, err := agent.LogPath()
 	if err != nil {
 		return fmt.Errorf("failed to determine log path: %w", err)
@@ -327,7 +384,7 @@ func (rl *RunnerDisableOptions) Run() error {
 		return fmt.Errorf("runner disable not supported on %s", runtime.GOOS)
 	}
 
-	agent := launchctl.Agent{Name: container.RunnerAgentLabel}
+	agent := launchctl.Agent{Name: runnerAgentLabel}
 	err := agent.Shutdown()
 	if err != nil {
 		return fmt.Errorf("failed to stop launchctl agent: %w", err)
@@ -353,20 +410,45 @@ type RunnerJobOptions struct {
 	Prune RunnerJobPruneOptions `cmd:"" help:"Remove runner logs for completed jobs."`
 }
 
-type RunnerJobPruneOptions struct{}
+type RunnerJobPruneOptions struct {
+	ConfigFile string `help:"Path to runner config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
+}
 
 func (r *RunnerJobPruneOptions) Run() error {
 	if runtime.GOOS != darwin {
 		return fmt.Errorf("runner job prune not supported on %s", runtime.GOOS)
 	}
 
-	jobIDs, err := container.GetLocaJobIDs(context.Background())
+	cfg, err := loadConfig(r.ConfigFile)
 	if err != nil {
-		return fmt.Errorf("failed to list jobs: %w", err)
+		return err
 	}
 
-	for _, jobID := range jobIDs {
-		err = container.DeleteJobLog(jobID)
+	logDir, err := jobLogDir()
+	if err != nil {
+		return err
+	}
+
+	provider, err := createProvider(cfg, logDir)
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+
+	// Get completed job IDs (jobs with log files that are not running)
+	completedIDs, err := p42runtime.GetCompletedJobIDs(ctx, provider)
+	if err != nil {
+		return fmt.Errorf("failed to list completed jobs: %w", err)
+	}
+
+	// Delete logs for completed jobs
+	for _, jobID := range completedIDs {
+		// Skip entries that don't match valid job ID format
+		if err := provider.ValidateJobID(jobID); err != nil {
+			continue
+		}
+		err = provider.DeleteJobLog(jobID)
 		if err != nil {
 			return fmt.Errorf("failed to prune log for %s: %w", jobID, err)
 		}
@@ -382,29 +464,9 @@ type ListRunnerJobOptions struct {
 }
 
 func (l *ListRunnerJobOptions) Run() error {
-	if l.ConfigFile == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("failed to determine home directory: %w", err)
-		}
-		l.ConfigFile = filepath.Join(homeDir, ".config", "plan42-runner.toml")
-	}
-
-	_, err := os.Stat(l.ConfigFile)
-	if errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("runner config file %s does not exist. Run `plan42 runner config` to configure the runner", l.ConfigFile)
-	}
-
-	f, err := os.Open(l.ConfigFile)
+	cfg, err := loadConfig(l.ConfigFile)
 	if err != nil {
-		return fmt.Errorf("failed to open runner config file: %w", err)
-	}
-	defer f.Close()
-
-	var cfg config.Config
-	err = toml.NewDecoder(f).Decode(&cfg)
-	if err != nil {
-		return fmt.Errorf("failed to decode runner config file: %w", err)
+		return err
 	}
 
 	if cfg.Runner.RunnerToken == "" {
@@ -430,7 +492,17 @@ func (l *ListRunnerJobOptions) Run() error {
 	}
 	client := p42.NewClient(cfg.Runner.URL, options...)
 
-	jobs, err := container.GetLocalJobs(context.Background(), client, tenantID, l.Verbose, l.All)
+	logDir, err := jobLogDir()
+	if err != nil {
+		return err
+	}
+
+	provider, err := createProvider(cfg, logDir)
+	if err != nil {
+		return err
+	}
+
+	jobs, err := p42runtime.GetJobs(context.Background(), provider, client, tenantID, l.Verbose, l.All)
 	if err != nil {
 		return fmt.Errorf("failed to list jobs: %w", err)
 	}
@@ -479,7 +551,7 @@ type JobWidths struct {
 	Created   int
 }
 
-func getJobWidths(jobs []*container.Job) JobWidths {
+func getJobWidths(jobs []*p42runtime.Job) JobWidths {
 	var ret JobWidths
 	ret.Running = max(len("true"), len("false"), len(runningColumn))
 	for _, job := range jobs {
@@ -523,11 +595,12 @@ func runnerJobLogPath(jobID string) (string, error) {
 		return "", fmt.Errorf("failed to determine user home directory: %w", err)
 	}
 
-	return filepath.Join(homeDir, "Library", "Logs", container.RunnerAgentLabel, jobID), nil
+	return filepath.Join(homeDir, "Library", "Logs", runnerAgentLabel, jobID), nil
 }
 
 type KillRunnerJobOptions struct {
-	JobID string `arg:"" help:"The job id to kill."`
+	JobID      string `arg:"" help:"The job id to kill."`
+	ConfigFile string `help:"Path to runner config file. Defaults to ~/.config/plan42-runner.toml" short:"c" optional:""`
 }
 
 func (k *KillRunnerJobOptions) Run() error {
@@ -535,12 +608,26 @@ func (k *KillRunnerJobOptions) Run() error {
 		return fmt.Errorf("runner job kill not supported on %s", runtime.GOOS)
 	}
 
-	err := container.ValidateJobID(k.JobID)
+	cfg, err := loadConfig(k.ConfigFile)
 	if err != nil {
 		return err
 	}
 
-	return container.KillJob(k.JobID)
+	logDir, err := jobLogDir()
+	if err != nil {
+		return err
+	}
+
+	provider, err := createProvider(cfg, logDir)
+	if err != nil {
+		return err
+	}
+
+	if err := provider.ValidateJobID(k.JobID); err != nil {
+		return err
+	}
+
+	return provider.KillJob(context.Background(), k.JobID)
 }
 
 type Options struct {

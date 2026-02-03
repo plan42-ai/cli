@@ -14,28 +14,30 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/plan42-ai/cli/internal/runtime"
+	"github.com/plan42-ai/cli/internal/p42runtime"
 	"github.com/plan42-ai/cli/internal/util"
 )
 
 const (
-	containerPrefix  = "plan42-"
-	runnerAgentLabel = "ai.plan42.runner"
+	containerPrefix = "plan42-"
 )
 
 // Provider implements RuntimeProvider for Apple's container runtime.
 type Provider struct {
 	containerPath string
+	logDir        string
 }
 
-// NewProvider creates a new Provider with the given container binary path.
+// NewProvider creates a new Provider with the given container binary path and log directory.
 // If containerPath is empty, it defaults to "container".
-func NewProvider(containerPath string) *Provider {
+// The logDir parameter specifies where job logs are stored.
+func NewProvider(containerPath string, logDir string) *Provider {
 	if containerPath == "" {
 		containerPath = "container"
 	}
 	return &Provider{
 		containerPath: containerPath,
+		logDir:        logDir,
 	}
 }
 
@@ -64,9 +66,8 @@ func (p *Provider) PullImage(ctx context.Context, image string) error {
 }
 
 // RunJob runs a job with the specified options.
-// The provider computes the log file path internally based on JobID,
-// storing logs in ~/Library/Logs/ai.plan42.runner/{JobID}.
-func (p *Provider) RunJob(ctx context.Context, opts runtime.JobOptions) error {
+// If p.logDir is set, logs are written to {logDir}/{JobID}.
+func (p *Provider) RunJob(ctx context.Context, opts p42runtime.JobOptions) error {
 	args := []string{"run"}
 
 	if opts.CPUs > 0 {
@@ -96,15 +97,10 @@ func (p *Provider) RunJob(ctx context.Context, opts runtime.JobOptions) error {
 	cmd := exec.CommandContext(ctx, p.containerPath, args...)
 	cmd.Stdin = opts.Stdin
 
-	// Compute log path internally based on JobID
-	if opts.JobID != "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("failed to get home directory: %w", err)
-		}
-
-		logPath := filepath.Join(homeDir, "Library", "Logs", runnerAgentLabel, opts.JobID)
-		if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+	// Write logs to logDir if configured
+	if opts.JobID != "" && p.logDir != "" {
+		logPath := filepath.Join(p.logDir, opts.JobID)
+		if err := os.MkdirAll(p.logDir, 0o755); err != nil {
 			return fmt.Errorf("failed to create log directory: %w", err)
 		}
 		logFile, err := os.Create(logPath)
@@ -186,16 +182,15 @@ func (p *Provider) GetRunningJobIDs(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
-// GetCompletedJobIDs returns IDs of all completed jobs with log files.
-// Log files are stored in ~/Library/Logs/ai.plan42.runner/.
-func (p *Provider) GetCompletedJobIDs() ([]string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get home directory: %w", err)
+// GetAllJobIDs returns IDs of all jobs with log files.
+// Log files are stored in the configured logDir.
+func (p *Provider) GetAllJobIDs(ctx context.Context) ([]string, error) {
+	_ = ctx
+	if p.logDir == "" {
+		return nil, nil
 	}
 
-	logDir := filepath.Join(homeDir, "Library", "Logs", runnerAgentLabel)
-	entries, err := os.ReadDir(logDir)
+	entries, err := os.ReadDir(p.logDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
@@ -240,20 +235,18 @@ func (p *Provider) ValidateJobID(jobID string) error {
 }
 
 // DeleteJobLog removes the log file for the specified job.
-// Log files are stored in ~/Library/Logs/ai.plan42.runner/.
 func (p *Provider) DeleteJobLog(jobID string) error {
 	if err := p.ValidateJobID(jobID); err != nil {
 		return err
 	}
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return err
+	if p.logDir == "" {
+		return nil
 	}
 
-	logPath := filepath.Join(homeDir, "Library", "Logs", runnerAgentLabel, jobID)
+	logPath := filepath.Join(p.logDir, jobID)
 
-	err = os.Remove(logPath)
+	err := os.Remove(logPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
