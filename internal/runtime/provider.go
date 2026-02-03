@@ -16,8 +16,6 @@ type Provider interface {
 	Name() string
 	// IsInstalled reports whether the runtime is available on the system.
 	IsInstalled() bool
-	// Validate checks that the runtime is properly configured and functional.
-	Validate(ctx context.Context) error
 
 	// PullImage pulls the specified container image.
 	PullImage(ctx context.Context, image string) error
@@ -51,7 +49,6 @@ type JobOptions struct {
 	Stdin      io.Reader
 	Stdout     io.Writer
 	Stderr     io.Writer
-	LogPath    string
 }
 
 // Job represents a container job managed by a runtime.
