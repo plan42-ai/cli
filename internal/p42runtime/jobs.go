@@ -169,21 +169,13 @@ func GetCompletedJobIDs(ctx context.Context, provider Provider) ([]string, error
 func GetJobs(ctx context.Context, provider Provider, client *p42.Client, tenantID string, verbose bool, includeCompleted bool) ([]*Job, error) {
 	seen := make(map[string]bool)
 	var jobs []*Job
-	var jobIDs []string
-	var err error
 
-	if includeCompleted {
-		jobIDs, err = provider.GetAllJobIDs(ctx)
-	} else {
-		jobIDs, err = provider.GetRunningJobIDs(ctx)
-	}
-
+	runningJobIDs, err := provider.GetRunningJobIDs(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch job IDs: %w", err)
+		return nil, fmt.Errorf("failed to fetch running job IDs: %w", err)
 	}
 
-	// Get running jobs
-	for _, id := range jobIDs {
+	for _, id := range runningJobIDs {
 		taskID, turnIndex, parseErr := parseJobID(id)
 		if parseErr != nil {
 			continue
@@ -194,6 +186,31 @@ func GetJobs(ctx context.Context, provider Provider, client *p42.Client, tenantI
 			TurnIndex: turnIndex,
 			Running:   true,
 		})
+	}
+
+	if includeCompleted {
+		allJobIDs, allErr := provider.GetAllJobIDs(ctx)
+		if allErr != nil {
+			return nil, fmt.Errorf("failed to fetch all job IDs: %w", allErr)
+		}
+
+		for _, id := range allJobIDs {
+			if seen[id] {
+				continue
+			}
+
+			taskID, turnIndex, parseErr := parseJobID(id)
+			if parseErr != nil {
+				continue
+			}
+
+			seen[id] = true
+			jobs = append(jobs, &Job{
+				TaskID:    taskID,
+				TurnIndex: turnIndex,
+				Running:   false,
+			})
+		}
 	}
 
 	fetchJobs(ctx, jobs, client, tenantID, verbose)
