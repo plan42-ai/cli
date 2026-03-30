@@ -305,3 +305,55 @@ func (req *pollerListRepoBranchesRequest) Process(ctx context.Context) messages.
 	}
 	return &messages.ListRepoBranchesResponse{Items: branchNames, NextToken: nextToken}
 }
+
+type pollerGetDefaultBranchesRequest struct {
+	messages.GetDefaultBranchesRequest
+	client *github.Client
+	err    error
+}
+
+func (req *pollerGetDefaultBranchesRequest) Init(p *Poller) {
+	req.client, req.err = p.GetClientForConnectionID(req.ConnectionID)
+}
+
+func (req *pollerGetDefaultBranchesRequest) Process(ctx context.Context) messages.Message {
+	slog.InfoContext(
+		ctx,
+		"received GetDefaultBranchesRequest message",
+		"connection_id", req.ConnectionID,
+		"repos", req.Repos,
+	)
+	if req.err != nil {
+		slog.ErrorContext(ctx, "unable to initialize github client", "error", req.err, "connection_id", req.ConnectionID)
+		return &messages.GetDefaultBranchesResponse{ErrorMessage: util.Pointer(req.err.Error())}
+	}
+	if len(req.Repos) == 0 {
+		slog.ErrorContext(ctx, "missing repos for default branch lookup", "connection_id", req.ConnectionID)
+		return &messages.GetDefaultBranchesResponse{ErrorMessage: util.Pointer("repos is required")}
+	}
+
+	var items []messages.RepoBranch
+	for _, repo := range req.Repos {
+		parts := strings.SplitN(repo, "/", 2)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			slog.ErrorContext(ctx, "invalid repo format", "repo", repo, "connection_id", req.ConnectionID)
+			return &messages.GetDefaultBranchesResponse{
+				ErrorMessage: util.Pointer(fmt.Sprintf("invalid repo format %q: expected owner/repo", repo)),
+			}
+		}
+		owner, name := parts[0], parts[1]
+
+		ghRepo, _, err := req.client.GetRepository(ctx, owner, name)
+		if err != nil {
+			slog.ErrorContext(ctx, "github get repository failed", "error", err, "repo", repo)
+			return &messages.GetDefaultBranchesResponse{ErrorMessage: util.Pointer(err.Error())}
+		}
+
+		items = append(items, messages.RepoBranch{
+			Repo:          repo,
+			DefaultBranch: ghRepo.GetDefaultBranch(),
+		})
+	}
+
+	return &messages.GetDefaultBranchesResponse{Items: items}
+}
