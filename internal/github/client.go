@@ -82,6 +82,10 @@ func (c *Client) ListBranches(ctx context.Context, owner string, repo string, op
 	return c.restClient.Repositories.ListBranches(ctx, owner, repo, opts)
 }
 
+func (c *Client) GetRepository(ctx context.Context, owner string, repo string) (*ghapi.Repository, *ghapi.Response, error) {
+	return c.restClient.Repositories.Get(ctx, owner, repo)
+}
+
 func (c *Client) GetPRFeedBack(ctx context.Context, org string, repo string, prNum int) ([]messages.PRFeedback, error) {
 	var err error
 	var ret []messages.PRFeedback
