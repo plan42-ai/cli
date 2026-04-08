@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/plan42-ai/cli/internal/docker"
@@ -59,6 +62,12 @@ func (req *pollerInvokeAgentRequest) Process(ctx context.Context) messages.Messa
 }
 
 func (req *pollerInvokeAgentRequest) invokeAsync(ctx context.Context, containerID string) {
+	// Send heartbeats for the duration of pre-container setup (PR feedback
+	// fetch + image pull) so the timeout-job doesn't mark the turn as failed.
+	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	defer stopHeartbeat()
+	go req.sendHeartbeats(heartbeatCtx)
+
 	if req.shouldFetchPRFeedback() {
 		if err := req.updateTurnStatus(ctx, "Checking for PR Feedback"); err != nil {
 			slog.ErrorContext(ctx, "failed to update turn status", "status", "Checking for PR Feedback", "error", err)
@@ -81,8 +90,73 @@ func (req *pollerInvokeAgentRequest) invokeAsync(ctx context.Context, containerI
 		return
 	}
 
+	// Image is pulled; stop heartbeats before handing off to the container,
+	// which manages its own keep-alive via the agent's StatusUpdater.
+	stopHeartbeat()
+
 	slog.InfoContext(ctx, "starting agent")
 	req.runContainer(ctx, containerID)
+}
+
+const keepAliveInterval = time.Minute
+
+// sendHeartbeats periodically sends no-op turn updates to bump UpdatedAt,
+// preventing the timeout-job from marking the turn as failed during
+// long-running pre-container operations like image pulls.
+func (req *pollerInvokeAgentRequest) sendHeartbeats(ctx context.Context) {
+	// #nosec: G404: Use of weak random number generator
+	//      This is being used for jitter. We don't need a secure RNG here.
+	timer := time.NewTimer(rand.N(keepAliveInterval))
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			stop, err := req.keepAlive(ctx)
+			if stop {
+				slog.InfoContext(ctx, "turn already completed, stopping heartbeats")
+				return
+			}
+			if err != nil {
+				slog.WarnContext(ctx, "heartbeat failed during image pull", "error", err)
+			}
+			// #nosec: G404: Use of weak random number generator
+			//      This is being used for jitter. We don't need a secure RNG here.
+			timer.Reset(rand.N(keepAliveInterval))
+		}
+	}
+}
+
+// keepAlive sends an empty UpdateTurn to bump the turn's UpdatedAt timestamp.
+// On conflict, it recovers the current turn from the error so subsequent
+// calls use the correct version. It returns stop=true if the turn has
+// reached a terminal state and heartbeats should cease.
+func (req *pollerInvokeAgentRequest) keepAlive(ctx context.Context) (stop bool, err error) {
+	updated, err := req.client.UpdateTurn(
+		ctx,
+		&p42.UpdateTurnRequest{
+			TenantID:  req.Turn.TenantID,
+			TaskID:    req.Turn.TaskID,
+			TurnIndex: req.Turn.TurnIndex,
+			Version:   req.Turn.Version,
+		},
+	)
+	if err == nil {
+		req.Turn = updated
+		return false, nil
+	}
+	var conflictErr *p42.ConflictError
+	if !errors.As(err, &conflictErr) {
+		return false, err
+	}
+	if turn, ok := conflictErr.Current.(*p42.Turn); ok && turn != nil {
+		req.Turn = turn
+		if turn.Status == "Completed" || turn.Status == "Failed" {
+			return true, err
+		}
+	}
+	return conflictErr.ErrorType == "UpdateCompletedTurn", err
 }
 
 func (req *pollerInvokeAgentRequest) runContainer(ctx context.Context, containerID string) {
