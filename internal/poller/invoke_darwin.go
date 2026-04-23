@@ -197,11 +197,12 @@ func (req *pollerInvokeAgentRequest) updateTurnStatus(ctx context.Context, statu
 	updated, err := req.client.UpdateTurn(
 		ctx,
 		&p42.UpdateTurnRequest{
-			TenantID:  req.Turn.TenantID,
-			TaskID:    req.Turn.TaskID,
-			TurnIndex: req.Turn.TurnIndex,
-			Version:   req.Turn.Version,
-			Status:    util.Pointer(status),
+			TenantID:     req.Turn.TenantID,
+			TaskID:       req.Turn.TaskID,
+			TurnIndex:    req.Turn.TurnIndex,
+			Version:      req.Turn.Version,
+			Status:       util.Pointer(status),
+			WorkstreamID: req.Turn.WorkstreamID,
 		},
 	)
 	if err != nil {
