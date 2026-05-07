@@ -12,7 +12,6 @@ import (
 	"github.com/plan42-ai/cli/internal/pollers/githubevents"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/sdk-go/p42"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -160,9 +159,9 @@ func TestPrivateConnectionTargetingThisRunner(t *testing.T) {
 	desired := ep.lastCall()
 	key := githubevents.CheckpointKey{GithubConnectionID: testConnID1, OrgName: testOrgName}
 	require.Contains(t, desired, key)
-	assert.Equal(t, testToken, desired[key].Token)
-	assert.Equal(t, testUserLogin, desired[key].User)
-	assert.Equal(t, "", desired[key].BaseURL)
+	require.Equal(t, testToken, desired[key].Token)
+	require.Equal(t, testUserLogin, desired[key].User)
+	require.Equal(t, "", desired[key].BaseURL)
 }
 
 func TestConnectionTargetingDifferentRunner(t *testing.T) {
@@ -179,7 +178,7 @@ func TestConnectionTargetingDifferentRunner(t *testing.T) {
 	require.True(t, ep.waitForCall(ctx))
 
 	desired := ep.lastCall()
-	assert.Empty(t, desired, "no pairs should be produced for a different runner")
+	require.Empty(t, desired, "no pairs should be produced for a different runner")
 }
 
 func TestNonPrivateConnection(t *testing.T) {
@@ -196,7 +195,7 @@ func TestNonPrivateConnection(t *testing.T) {
 	require.True(t, ep.waitForCall(ctx))
 
 	desired := ep.lastCall()
-	assert.Empty(t, desired, "non-private connections should be excluded")
+	require.Empty(t, desired, "non-private connections should be excluded")
 }
 
 func TestDefaultConnectionIDResolution(t *testing.T) {
@@ -281,12 +280,12 @@ func TestMultipleOrgsAcrossMultipleEnvironments(t *testing.T) {
 	require.True(t, ep.waitForCall(ctx))
 
 	desired := ep.lastCall()
-	assert.Len(t, desired, 4)
+	require.Len(t, desired, 4)
 
-	assert.Contains(t, desired, githubevents.CheckpointKey{GithubConnectionID: testConnID1, OrgName: "org-a"})
-	assert.Contains(t, desired, githubevents.CheckpointKey{GithubConnectionID: testConnID1, OrgName: "org-b"})
-	assert.Contains(t, desired, githubevents.CheckpointKey{GithubConnectionID: testConnID2, OrgName: "org-c"})
-	assert.Contains(t, desired, githubevents.CheckpointKey{GithubConnectionID: testConnID2, OrgName: "org-a"})
+	require.Contains(t, desired, githubevents.CheckpointKey{GithubConnectionID: testConnID1, OrgName: "org-a"})
+	require.Contains(t, desired, githubevents.CheckpointKey{GithubConnectionID: testConnID1, OrgName: "org-b"})
+	require.Contains(t, desired, githubevents.CheckpointKey{GithubConnectionID: testConnID2, OrgName: "org-c"})
+	require.Contains(t, desired, githubevents.CheckpointKey{GithubConnectionID: testConnID2, OrgName: "org-a"})
 }
 
 func TestEnvironmentWithNoRepos(t *testing.T) {
@@ -303,7 +302,7 @@ func TestEnvironmentWithNoRepos(t *testing.T) {
 	require.True(t, ep.waitForCall(ctx))
 
 	desired := ep.lastCall()
-	assert.Empty(t, desired, "environment with no repos should produce no pairs")
+	require.Empty(t, desired, "environment with no repos should produce no pairs")
 }
 
 func TestDeduplicationAcrossEnvironments(t *testing.T) {
@@ -345,9 +344,9 @@ func TestDeduplicationAcrossEnvironments(t *testing.T) {
 	require.True(t, ep.waitForCall(ctx))
 
 	desired := ep.lastCall()
-	assert.Len(t, desired, 1, "same (connectionID, org) pair from different environments should be deduplicated")
+	require.Len(t, desired, 1, "same (connectionID, org) pair from different environments should be deduplicated")
 	key := githubevents.CheckpointKey{GithubConnectionID: testConnID1, OrgName: "same-org"}
-	assert.Contains(t, desired, key)
+	require.Contains(t, desired, key)
 }
 
 func TestGracefulShutdownStopsLoop(t *testing.T) {
@@ -365,7 +364,7 @@ func TestGracefulShutdownStopsLoop(t *testing.T) {
 	countAfterShutdown := ep.callCount()
 
 	time.Sleep(100 * time.Millisecond)
-	assert.Equal(t, countAfterShutdown, ep.callCount(),
+	require.Equal(t, countAfterShutdown, ep.callCount(),
 		"no more UpdateTargets calls should happen after shutdown")
 }
 
@@ -427,12 +426,12 @@ func TestMixedConnections(t *testing.T) {
 	require.True(t, ep.waitForCall(ctx))
 
 	desired := ep.lastCall()
-	assert.Len(t, desired, 1, "only the private connection targeting this runner should produce pairs")
+	require.Len(t, desired, 1, "only the private connection targeting this runner should produce pairs")
 
 	key := githubevents.CheckpointKey{GithubConnectionID: testConnID1, OrgName: "good-org"}
 	require.Contains(t, desired, key)
-	assert.Equal(t, "token1", desired[key].Token)
-	assert.Equal(t, "user1", desired[key].User)
+	require.Equal(t, "token1", desired[key].Token)
+	require.Equal(t, "user1", desired[key].User)
 }
 
 func TestResolveConnectionID(t *testing.T) {
@@ -452,7 +451,7 @@ func TestResolveConnectionID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := resolveConnectionID(tt.envConnID, tt.defaultConn)
-			assert.Equal(t, tt.want, got)
+			require.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -472,7 +471,7 @@ func TestExtractOrg(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			assert.Equal(t, tt.want, extractOrg(tt.input))
+			require.Equal(t, tt.want, extractOrg(tt.input))
 		})
 	}
 }

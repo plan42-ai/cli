@@ -129,6 +129,8 @@ func forwardToSibling(execName string, commandDepth int) error {
 		execName,
 	}
 	args = append(args, os.Args[commandDepth:]...)
+	// #nosec: G702: Command injection via taint analysis
+	//     We are intentinoally fowarding our command line args to another executable. This is ok.
 	err = syscall.Exec(execPath, args, os.Environ())
 	if err != nil {
 		return err
@@ -364,6 +366,7 @@ func viewLogFile(logPath string, follow bool) error {
 	}
 
 	// #nosec: G204 : Subprocess launched with a potential tainted input or cmd arguments
+	// #nosec: G702 : Command injection via taint analysis
 	// #    This is on purpose. We execute the PAGER that it configured in the users environment.
 	pagerCmd := exec.Command(pagerArgs[0], pagerArgs[1:]...)
 	pagerCmd.Stdin = reader

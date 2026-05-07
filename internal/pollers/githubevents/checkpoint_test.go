@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -51,7 +50,7 @@ func TestLoadFromMissingFile(t *testing.T) {
 
 	key := CheckpointKey{GithubConnectionID: testConn1, OrgName: testOrg1}
 	_, ok := store.Get(key)
-	assert.False(t, ok, "missing file should yield empty state")
+	require.False(t, ok, "missing file should yield empty state")
 }
 
 func TestLoadFromValidFile(t *testing.T) {
@@ -67,9 +66,9 @@ func TestLoadFromValidFile(t *testing.T) {
 	key := CheckpointKey{GithubConnectionID: "conn-abc", OrgName: "my-org"}
 	cp, ok := store.Get(key)
 	require.True(t, ok)
-	assert.Equal(t, "12345", cp.LastEventID)
-	assert.Equal(t, `"abc"`, cp.ETag)
-	assert.Equal(t, 90, cp.PollIntervalSecs)
+	require.Equal(t, "12345", cp.LastEventID)
+	require.Equal(t, `"abc"`, cp.ETag)
+	require.Equal(t, 90, cp.PollIntervalSecs)
 }
 
 func TestLoadFromCorruptFile(t *testing.T) {
@@ -78,7 +77,7 @@ func TestLoadFromCorruptFile(t *testing.T) {
 
 	key := CheckpointKey{GithubConnectionID: "x", OrgName: "y"}
 	_, ok := store.Get(key)
-	assert.False(t, ok, "corrupt file should yield empty state")
+	require.False(t, ok, "corrupt file should yield empty state")
 }
 
 func TestSetGetDelete(t *testing.T) {
@@ -87,40 +86,40 @@ func TestSetGetDelete(t *testing.T) {
 
 	// Initially absent.
 	_, ok := store.Get(key)
-	assert.False(t, ok)
+	require.False(t, ok)
 
 	// Set and retrieve.
 	store.Set(key, Checkpoint{LastEventID: "100", ETag: `"e"`, PollIntervalSecs: 60})
 	cp, ok := store.Get(key)
 	require.True(t, ok)
-	assert.Equal(t, "100", cp.LastEventID)
-	assert.Equal(t, `"e"`, cp.ETag)
-	assert.Equal(t, 60, cp.PollIntervalSecs)
+	require.Equal(t, "100", cp.LastEventID)
+	require.Equal(t, `"e"`, cp.ETag)
+	require.Equal(t, 60, cp.PollIntervalSecs)
 
 	// Overwrite.
 	store.Set(key, Checkpoint{LastEventID: "200", ETag: `"f"`, PollIntervalSecs: 120})
 	cp, ok = store.Get(key)
 	require.True(t, ok)
-	assert.Equal(t, "200", cp.LastEventID)
+	require.Equal(t, "200", cp.LastEventID)
 
 	// Delete.
 	store.Delete(key)
 	_, ok = store.Get(key)
-	assert.False(t, ok)
+	require.False(t, ok)
 }
 
 func TestDirtyFlag(t *testing.T) {
 	store, _ := newTestStore(t)
 
 	store.mu.Lock()
-	assert.False(t, store.dirty, "new store should not be dirty")
+	require.False(t, store.dirty, "new store should not be dirty")
 	store.mu.Unlock()
 
 	key := CheckpointKey{GithubConnectionID: "c1", OrgName: "o1"}
 	store.Set(key, Checkpoint{LastEventID: "1"})
 
 	store.mu.Lock()
-	assert.True(t, store.dirty, "store should be dirty after Set")
+	require.True(t, store.dirty, "store should be dirty after Set")
 	store.mu.Unlock()
 }
 
@@ -128,14 +127,14 @@ func TestTimerScheduledOnFirstMutation(t *testing.T) {
 	store, _ := newTestStore(t)
 
 	store.mu.Lock()
-	assert.True(t, store.stopped, "timer should start stopped")
+	require.True(t, store.stopped, "timer should start stopped")
 	store.mu.Unlock()
 
 	key := CheckpointKey{GithubConnectionID: "c1", OrgName: "o1"}
 	store.Set(key, Checkpoint{LastEventID: "1"})
 
 	store.mu.Lock()
-	assert.False(t, store.stopped, "timer should be running after mutation")
+	require.False(t, store.stopped, "timer should be running after mutation")
 	store.mu.Unlock()
 }
 
@@ -146,14 +145,14 @@ func TestTimerNotResetOnSubsequentMutations(t *testing.T) {
 	store.Set(key, Checkpoint{LastEventID: "1"})
 
 	store.mu.Lock()
-	assert.False(t, store.stopped)
+	require.False(t, store.stopped)
 	store.mu.Unlock()
 
 	// Second mutation should leave the timer running (stopped stays false).
 	store.Set(key, Checkpoint{LastEventID: "2"})
 
 	store.mu.Lock()
-	assert.False(t, store.stopped, "timer should still be running")
+	require.False(t, store.stopped, "timer should still be running")
 	store.mu.Unlock()
 }
 
@@ -173,9 +172,9 @@ func TestFlushWritesToDisk(t *testing.T) {
 
 	entry, ok := parsed[testConn1+":"+testOrg1]
 	require.True(t, ok)
-	assert.Equal(t, "42", entry.LastEventID)
-	assert.Equal(t, `"etag1"`, entry.ETag)
-	assert.Equal(t, 60, entry.PollIntervalSecs)
+	require.Equal(t, "42", entry.LastEventID)
+	require.Equal(t, `"etag1"`, entry.ETag)
+	require.Equal(t, 60, entry.PollIntervalSecs)
 }
 
 func TestFlushClearsDirtyFlag(t *testing.T) {
@@ -186,7 +185,7 @@ func TestFlushClearsDirtyFlag(t *testing.T) {
 	store.flush()
 
 	store.mu.Lock()
-	assert.False(t, store.dirty, "flush should clear dirty flag")
+	require.False(t, store.dirty, "flush should clear dirty flag")
 	store.mu.Unlock()
 }
 
@@ -197,7 +196,7 @@ func TestFlushNoOpWhenNotDirty(t *testing.T) {
 	store.flush()
 
 	_, err := os.Stat(path)
-	assert.True(t, os.IsNotExist(err), "no file should be written when store is not dirty")
+	require.True(t, os.IsNotExist(err), "no file should be written when store is not dirty")
 }
 
 func TestAtomicWriteProducesCorrectFile(t *testing.T) {
@@ -216,17 +215,17 @@ func TestAtomicWriteProducesCorrectFile(t *testing.T) {
 
 	var parsed map[string]checkpointFileEntry
 	require.NoError(t, json.Unmarshal(data, &parsed))
-	assert.Len(t, parsed, 2)
+	require.Len(t, parsed, 2)
 
 	e1 := parsed["c1:o1"]
-	assert.Equal(t, "10", e1.LastEventID)
-	assert.Equal(t, `"e1"`, e1.ETag)
-	assert.Equal(t, 60, e1.PollIntervalSecs)
+	require.Equal(t, "10", e1.LastEventID)
+	require.Equal(t, `"e1"`, e1.ETag)
+	require.Equal(t, 60, e1.PollIntervalSecs)
 
 	e2 := parsed["c2:o2"]
-	assert.Equal(t, "20", e2.LastEventID)
-	assert.Equal(t, `"e2"`, e2.ETag)
-	assert.Equal(t, 120, e2.PollIntervalSecs)
+	require.Equal(t, "20", e2.LastEventID)
+	require.Equal(t, `"e2"`, e2.ETag)
+	require.Equal(t, 120, e2.PollIntervalSecs)
 }
 
 func TestShutdownFlushWritesPendingChanges(t *testing.T) {
@@ -253,8 +252,8 @@ func TestShutdownFlushWritesPendingChanges(t *testing.T) {
 
 	entry, ok := parsed["c1:o1"]
 	require.True(t, ok)
-	assert.Equal(t, "99", entry.LastEventID)
-	assert.Equal(t, `"final"`, entry.ETag)
+	require.Equal(t, "99", entry.LastEventID)
+	require.Equal(t, `"final"`, entry.ETag)
 }
 
 func TestFilePermissions(t *testing.T) {
@@ -266,7 +265,7 @@ func TestFilePermissions(t *testing.T) {
 
 	info, err := os.Stat(path)
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0600), info.Mode().Perm(),
+	require.Equal(t, os.FileMode(0600), info.Mode().Perm(),
 		"checkpoint file should have 0600 permissions")
 }
 
@@ -289,12 +288,12 @@ func TestDirectoryCreation(t *testing.T) {
 	// Verify the config directory was created with correct permissions.
 	info, err := os.Stat(configDir)
 	require.NoError(t, err)
-	assert.True(t, info.IsDir())
-	assert.Equal(t, os.FileMode(0700), info.Mode().Perm(),
+	require.True(t, info.IsDir())
+	require.Equal(t, os.FileMode(0700), info.Mode().Perm(),
 		"config directory should have 0700 permissions")
 
 	// Verify the path matches expectation.
-	assert.Equal(t, path, store.path)
+	require.Equal(t, path, store.path)
 }
 
 func TestConcurrentAccess(t *testing.T) {
@@ -394,9 +393,9 @@ func TestRoundTripThroughFile(t *testing.T) {
 
 	cp, ok := store2.Get(key)
 	require.True(t, ok)
-	assert.Equal(t, "round-trip", cp.LastEventID)
-	assert.Equal(t, `"rt-etag"`, cp.ETag)
-	assert.Equal(t, 90, cp.PollIntervalSecs)
+	require.Equal(t, "round-trip", cp.LastEventID)
+	require.Equal(t, `"rt-etag"`, cp.ETag)
+	require.Equal(t, 90, cp.PollIntervalSecs)
 }
 
 func TestDeleteRemovesEntryFromDisk(t *testing.T) {
@@ -414,7 +413,7 @@ func TestDeleteRemovesEntryFromDisk(t *testing.T) {
 
 	var parsed map[string]checkpointFileEntry
 	require.NoError(t, json.Unmarshal(data, &parsed))
-	assert.Empty(t, parsed)
+	require.Empty(t, parsed)
 }
 
 func TestParseCompositeKey(t *testing.T) {
@@ -433,9 +432,9 @@ func TestParseCompositeKey(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			key, ok := parseCompositeKey(tt.input)
-			assert.Equal(t, tt.wantOk, ok)
+			require.Equal(t, tt.wantOk, ok)
 			if ok {
-				assert.Equal(t, tt.wantKey, key)
+				require.Equal(t, tt.wantKey, key)
 			}
 		})
 	}
@@ -458,11 +457,11 @@ func TestMultipleEntries(t *testing.T) {
 
 	cp1, ok := store.Get(CheckpointKey{GithubConnectionID: testConn1, OrgName: testOrg1})
 	require.True(t, ok)
-	assert.Equal(t, "100", cp1.LastEventID)
-	assert.Equal(t, 60, cp1.PollIntervalSecs)
+	require.Equal(t, "100", cp1.LastEventID)
+	require.Equal(t, 60, cp1.PollIntervalSecs)
 
 	cp2, ok := store.Get(CheckpointKey{GithubConnectionID: "conn2", OrgName: "org2"})
 	require.True(t, ok)
-	assert.Equal(t, "200", cp2.LastEventID)
-	assert.Equal(t, 120, cp2.PollIntervalSecs)
+	require.Equal(t, "200", cp2.LastEventID)
+	require.Equal(t, 120, cp2.PollIntervalSecs)
 }
