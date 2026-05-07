@@ -28,6 +28,14 @@ type CheckpointKey struct {
 	OrgName            string
 }
 
+// ConnectionInfo carries the connection details needed to construct a
+// GitHub client for polling a (GithubConnectionID, OrgName) pair.
+type ConnectionInfo struct {
+	Token   string
+	BaseURL string
+	User    string
+}
+
 // Checkpoint holds the durable state for a single polling pair.
 type Checkpoint struct {
 	LastEventID      string
@@ -238,14 +246,18 @@ func (s *CheckpointStore) snapshotLocked() map[string]checkpointFileEntry {
 	return out
 }
 
-// Flush is called during runner shutdown. It stops the debounce timer, waits
-// for any in-flight timer-scheduled flush, and runs a synchronous final flush.
+// Flush is called during runner shutdown. It cancels the watch goroutine,
+// stops the debounce timer, waits for any in-flight timer-scheduled flush,
+// and runs a synchronous final flush.
 func (s *CheckpointStore) Flush(ctx context.Context) error {
 	s.mu.Lock()
 	s.timer.Stop()
 	s.stopped = true
 	s.mu.Unlock()
 
+	// Cancel the cg so the watchTimer goroutine exits, then wait for
+	// any in-flight flush to complete.
+	s.cg.Cancel()
 	if err := s.cg.WaitContext(ctx); err != nil {
 		return err
 	}

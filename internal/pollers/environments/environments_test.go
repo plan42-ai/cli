@@ -33,7 +33,7 @@ const (
 // mockReconciler records calls to Reconcile.
 type mockReconciler struct {
 	mu    sync.Mutex
-	calls []map[githubevents.CheckpointKey]ConnectionInfo
+	calls []map[githubevents.CheckpointKey]githubevents.ConnectionInfo
 	ch    chan struct{}
 }
 
@@ -41,14 +41,14 @@ func newMockReconciler() *mockReconciler {
 	return &mockReconciler{ch: make(chan struct{}, 100)}
 }
 
-func (m *mockReconciler) Reconcile(desired map[githubevents.CheckpointKey]ConnectionInfo) {
+func (m *mockReconciler) Reconcile(desired map[githubevents.CheckpointKey]githubevents.ConnectionInfo) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, desired)
 	m.ch <- struct{}{}
 }
 
-func (m *mockReconciler) lastCall() map[githubevents.CheckpointKey]ConnectionInfo {
+func (m *mockReconciler) lastCall() map[githubevents.CheckpointKey]githubevents.ConnectionInfo {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if len(m.calls) == 0 {

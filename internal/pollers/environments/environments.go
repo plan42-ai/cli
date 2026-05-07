@@ -21,15 +21,7 @@ const maxDiscoveryInterval = 60 * time.Second
 // Environment discovery calls Reconcile on each iteration with the desired
 // set of polling pairs and their connection details.
 type Reconciler interface {
-	Reconcile(desired map[githubevents.CheckpointKey]ConnectionInfo)
-}
-
-// ConnectionInfo carries the connection details needed to construct a
-// GitHub client for polling a (GithubConnectionID, OrgName) pair.
-type ConnectionInfo struct {
-	Token   string
-	BaseURL string
-	User    string
+	Reconcile(desired map[githubevents.CheckpointKey]githubevents.ConnectionInfo)
 }
 
 // Config holds the dependencies for the environment discovery poller.
@@ -139,7 +131,7 @@ func (p *Poller) discover(ctx context.Context) {
 	}
 
 	// Steps 5-7: Build the desired set of (GithubConnectionID, OrgName) pairs.
-	desired := make(map[githubevents.CheckpointKey]ConnectionInfo)
+	desired := make(map[githubevents.CheckpointKey]githubevents.ConnectionInfo)
 	for _, env := range environments {
 		effectiveConnID := resolveConnectionID(env.GithubConnectionID, defaultConnID)
 		if effectiveConnID == "" {
@@ -161,7 +153,7 @@ func (p *Poller) discover(ctx context.Context) {
 				OrgName:            org,
 			}
 			if _, exists := desired[key]; !exists {
-				desired[key] = ConnectionInfo{
+				desired[key] = githubevents.ConnectionInfo{
 					Token:   derefStr(conn.OAuthToken),
 					BaseURL: "",
 					User:    derefStr(conn.GithubUserLogin),
