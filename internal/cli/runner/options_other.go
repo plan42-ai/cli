@@ -5,13 +5,13 @@ package runner
 import (
 	"context"
 
-	"github.com/plan42-ai/cli/internal/poller"
+	"github.com/plan42-ai/cli/internal/pollers/messages"
 )
 
 type PlatformOptions struct {
 }
 
-func (p *PlatformOptions) PollerOptions(options []poller.Option) []poller.Option {
+func (p *PlatformOptions) PollerOptions(options []messages.Option) []messages.Option {
 	return options
 }
 

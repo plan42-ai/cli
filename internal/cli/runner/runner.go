@@ -10,7 +10,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"github.com/plan42-ai/cli/internal/config"
 	"github.com/plan42-ai/cli/internal/p42runtime"
-	"github.com/plan42-ai/cli/internal/poller"
+	"github.com/plan42-ai/cli/internal/pollers/messages"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/sdk-go/p42"
 )
@@ -24,9 +24,9 @@ type Options struct {
 	ConnectionIdx map[string]*config.GithubInfo `kong:"-"` // indexes github config based on connection id.
 }
 
-func (o *Options) PollerOptions() []poller.Option {
-	ret := []poller.Option{
-		poller.WithConnectionIdx(o.ConnectionIdx),
+func (o *Options) PollerOptions() []messages.Option {
+	ret := []messages.Option{
+		messages.WithConnectionIdx(o.ConnectionIdx),
 	}
 	ret = o.PlatformOptions.PollerOptions(ret)
 	return ret

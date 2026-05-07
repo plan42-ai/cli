@@ -1,4 +1,4 @@
-package poller
+package messages
 
 import (
 	"github.com/plan42-ai/sdk-go/p42"
