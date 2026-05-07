@@ -1,6 +1,6 @@
 module github.com/plan42-ai/cli
 
-go 1.25.5
+go 1.26.2
 
 require (
 	github.com/alecthomas/kong v1.13.0
@@ -18,16 +18,18 @@ require (
 	github.com/plan42-ai/ecies v1.0.3
 	github.com/plan42-ai/log v1.0.3
 	github.com/plan42-ai/openid v1.0.3
-	github.com/plan42-ai/sdk-go v1.0.107
+	github.com/plan42-ai/sdk-go v1.0.109
 	github.com/plan42-ai/xml v1.25.5-2
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/oauth2 v0.34.0
 )
 
+require github.com/plan42-ai/cache v1.0.1 // indirect
+
 require (
 	github.com/atotto/clipboard v0.1.4 // indirect
-	github.com/aws/aws-sdk-go-v2 v1.41.1 // indirect
-	github.com/aws/smithy-go v1.24.0 // indirect
+	github.com/aws/aws-sdk-go-v2 v1.41.7 // indirect
+	github.com/aws/smithy-go v1.25.1 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.4.1 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.14 // indirect
@@ -45,14 +47,17 @@ require (
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/plan42-ai/clock v1.1.4 // indirect
-	github.com/plan42-ai/sigv4util v1.0.3 // indirect
+	github.com/plan42-ai/github-event-handlers v0.0.0
+	github.com/plan42-ai/sigv4util v1.0.4 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sahilm/fuzzy v0.1.1 // indirect
 	github.com/scottwis/persistent v1.0.8 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	golang.org/x/exp v0.0.0-20260112195511-716be5621a96 // indirect
+	golang.org/x/exp v0.0.0-20260508232706-74f9aab9d74a // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/plan42-ai/github-event-handlers => ../github-event-handlers
