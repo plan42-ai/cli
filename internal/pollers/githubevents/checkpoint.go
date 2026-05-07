@@ -277,3 +277,4 @@ func (s *CheckpointStore) stopTimer() {
 	s.timer.Stop()
 	s.stopped = true
 }
+

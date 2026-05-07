@@ -1,6 +1,6 @@
 module github.com/plan42-ai/cli
 
-go 1.25.5
+go 1.26.2
 
 require (
 	github.com/alecthomas/kong v1.13.0
@@ -45,6 +45,7 @@ require (
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/plan42-ai/clock v1.1.4 // indirect
+	github.com/plan42-ai/github-event-handlers v0.0.0
 	github.com/plan42-ai/sigv4util v1.0.3 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
@@ -56,3 +57,5 @@ require (
 	golang.org/x/text v0.33.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/plan42-ai/github-event-handlers => ../github-event-handlers

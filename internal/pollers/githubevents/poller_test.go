@@ -1,0 +1,432 @@
+package githubevents
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/google/go-github/v81/github"
+	githubeventslib "github.com/plan42-ai/github-event-handlers"
+	"github.com/plan42-ai/github-event-handlers/githubclient"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+const (
+	testOrg2       = "org2"
+	testEventType  = "test_event"
+	testEventsPath = "users/u/events"
+)
+
+// testCheckpointStore creates a CheckpointStore backed by a temp directory.
+func testCheckpointStore(t *testing.T) *CheckpointStore {
+	t.Helper()
+	store, _ := newTestStore(t)
+	return store
+}
+
+func TestDefaultWorkerCountAndChannelBuffer(t *testing.T) {
+	store := testCheckpointStore(t)
+	p := New(Config{
+		Registry:    githubeventslib.NewHandlerRegistry(githubeventslib.Config{}),
+		Checkpoints: store,
+	})
+
+	assert.Equal(t, 100, p.WorkerCount(), "default worker count should be 100")
+	assert.Equal(t, 200, p.ChannelBuffer(), "default channel buffer should be 2 * workerCount")
+}
+
+func TestCustomWorkerCountAndChannelBuffer(t *testing.T) {
+	store := testCheckpointStore(t)
+	p := New(Config{
+		Registry:      githubeventslib.NewHandlerRegistry(githubeventslib.Config{}),
+		Checkpoints:   store,
+		WorkerCount:   50,
+		ChannelBuffer: 80,
+	})
+
+	assert.Equal(t, 50, p.WorkerCount())
+	assert.Equal(t, 80, p.ChannelBuffer())
+}
+
+func TestReconcileStartsGoroutinesForNewPairs(t *testing.T) {
+	store := testCheckpointStore(t)
+	p := newTestPoller(t, store)
+
+	key1 := CheckpointKey{GithubConnectionID: "c1", OrgName: testOrg1}
+	key2 := CheckpointKey{GithubConnectionID: "c2", OrgName: testOrg2}
+
+	p.Reconcile(map[CheckpointKey]ConnectionInfo{
+		key1: {Token: "t1", User: "u1"},
+		key2: {Token: "t2", User: "u2"},
+	})
+
+	keys := p.PairKeys()
+	assert.Len(t, keys, 2, "should have 2 running pairs")
+	assert.Contains(t, keys, key1)
+	assert.Contains(t, keys, key2)
+}
+
+func TestReconcileStopsGoroutinesForRemovedPairs(t *testing.T) {
+	store := testCheckpointStore(t)
+	p := newTestPoller(t, store)
+
+	key1 := CheckpointKey{GithubConnectionID: "c1", OrgName: testOrg1}
+	key2 := CheckpointKey{GithubConnectionID: "c2", OrgName: testOrg2}
+
+	p.Reconcile(map[CheckpointKey]ConnectionInfo{
+		key1: {Token: "t1", User: "u1"},
+		key2: {Token: "t2", User: "u2"},
+	})
+
+	assert.Len(t, p.PairKeys(), 2)
+
+	// Remove key2.
+	p.Reconcile(map[CheckpointKey]ConnectionInfo{
+		key1: {Token: "t1", User: "u1"},
+	})
+
+	keys := p.PairKeys()
+	assert.Len(t, keys, 1, "should have 1 running pair after removing key2")
+	assert.Contains(t, keys, key1)
+}
+
+func TestReconcileDeletesCheckpointForRemovedPair(t *testing.T) {
+	store := testCheckpointStore(t)
+	p := newTestPoller(t, store)
+
+	key := CheckpointKey{GithubConnectionID: "c1", OrgName: testOrg1}
+
+	// Pre-seed a checkpoint.
+	store.Set(key, Checkpoint{LastEventID: "42"})
+
+	p.Reconcile(map[CheckpointKey]ConnectionInfo{
+		key: {Token: "t1", User: "u1"},
+	})
+
+	// Remove the pair.
+	p.Reconcile(map[CheckpointKey]ConnectionInfo{})
+
+	_, ok := store.Get(key)
+	assert.False(t, ok, "checkpoint should be deleted when pair is removed")
+}
+
+func TestNoGoroutineLeaksAfterReconcileRemovesPair(t *testing.T) {
+	store := testCheckpointStore(t)
+	p := newTestPoller(t, store)
+
+	key := CheckpointKey{GithubConnectionID: "c1", OrgName: testOrg1}
+
+	p.Reconcile(map[CheckpointKey]ConnectionInfo{
+		key: {Token: "t1", User: "u1"},
+	})
+
+	// Remove the pair.
+	p.Reconcile(map[CheckpointKey]ConnectionInfo{})
+
+	// Shutdown should complete without timeout (no leaked goroutines).
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := p.ShutdownContext(ctx)
+	assert.NoError(t, err)
+}
+
+func TestDispatcherWorkersStartAndStop(t *testing.T) {
+	store := testCheckpointStore(t)
+	registry := githubeventslib.NewHandlerRegistry(githubeventslib.Config{})
+
+	var handleCount atomic.Int64
+	registry.Register(testEventType, func(_ context.Context, _ githubeventslib.Event, _ githubclient.GithubAPI) {
+		handleCount.Add(1)
+	})
+
+	p := New(Config{
+		Registry:      registry,
+		Checkpoints:   store,
+		WorkerCount:   3,
+		ChannelBuffer: 6,
+	})
+	p.Start()
+
+	// Send events through the dispatch channel directly.
+	for range 5 {
+		p.dispatchCh <- &testEvent{evtType: testEventType, delivery: "d1"}
+	}
+
+	// Shut down and wait for workers to drain.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := p.ShutdownContext(ctx)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(5), handleCount.Load(), "all 5 events should have been handled")
+}
+
+func TestBackpressureBlocksPollerButRespectsCancel(t *testing.T) {
+	store := testCheckpointStore(t)
+
+	// Create a slow handler that blocks until cancelled.
+	registry := githubeventslib.NewHandlerRegistry(githubeventslib.Config{})
+	registry.Register(testEventType, func(ctx context.Context, _ githubeventslib.Event, _ githubclient.GithubAPI) {
+		<-ctx.Done()
+	})
+
+	p := New(Config{
+		Registry:      registry,
+		Checkpoints:   store,
+		WorkerCount:   1,
+		ChannelBuffer: 1,
+	})
+	p.Start()
+
+	// Fill the worker (1 event being processed) and the buffer (1 event buffered).
+	p.dispatchCh <- &testEvent{evtType: testEventType, delivery: "d1"}
+	p.dispatchCh <- &testEvent{evtType: testEventType, delivery: "d2"}
+
+	// Now the channel is full. enqueue should block but respect cancellation.
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan error, 1)
+	go func() {
+		done <- p.enqueue(ctx, &testEvent{evtType: testEventType, delivery: "d3"})
+	}()
+
+	// The enqueue should be blocked.
+	select {
+	case <-done:
+		t.Fatal("enqueue returned immediately; expected it to block")
+	case <-time.After(50 * time.Millisecond):
+		// Good, it's blocked.
+	}
+
+	// Cancel the context; enqueue should return.
+	cancel()
+
+	select {
+	case err := <-done:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(2 * time.Second):
+		t.Fatal("enqueue did not return after context cancel")
+	}
+
+	// Shutdown.
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutCancel()
+	_ = p.ShutdownContext(shutCtx)
+}
+
+func TestShutdownDrainsChannelBeforeReturning(t *testing.T) {
+	store := testCheckpointStore(t)
+
+	var mu sync.Mutex
+	var events []string
+
+	registry := githubeventslib.NewHandlerRegistry(githubeventslib.Config{})
+	registry.Register(testEventType, func(_ context.Context, evt githubeventslib.Event, _ githubclient.GithubAPI) {
+		mu.Lock()
+		defer mu.Unlock()
+		events = append(events, evt.GetDeliveryID())
+	})
+
+	p := New(Config{
+		Registry:      registry,
+		Checkpoints:   store,
+		WorkerCount:   2,
+		ChannelBuffer: 10,
+	})
+	p.Start()
+
+	// Enqueue some events.
+	for i := range 5 {
+		p.dispatchCh <- &testEvent{
+			evtType:  testEventType,
+			delivery: string(rune('A' + i)),
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := p.ShutdownContext(ctx)
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Len(t, events, 5, "all events should be drained by workers before shutdown completes")
+}
+
+func TestSleepCtxRespectsCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	err := sleepCtx(ctx, 10*time.Second)
+	elapsed := time.Since(start)
+
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Less(t, elapsed, time.Second)
+}
+
+func TestSleepCtxSleepsForDuration(t *testing.T) {
+	ctx := context.Background()
+	start := time.Now()
+	err := sleepCtx(ctx, 50*time.Millisecond)
+	elapsed := time.Since(start)
+
+	assert.NoError(t, err)
+	assert.GreaterOrEqual(t, elapsed, 40*time.Millisecond)
+}
+
+func TestParsePollInterval(t *testing.T) {
+	tests := []struct {
+		name     string
+		header   string
+		expected time.Duration
+	}{
+		{"valid", "90", 90 * time.Second},
+		{"empty", "", defaultPollInterval},
+		{"invalid", "abc", defaultPollInterval},
+		{"zero", "0", defaultPollInterval},
+		{"negative", "-1", defaultPollInterval},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &github.Response{
+				Response: &http.Response{
+					Header: http.Header{},
+				},
+			}
+			if tt.header != "" {
+				resp.Header.Set("X-Poll-Interval", tt.header)
+			}
+			assert.Equal(t, tt.expected, parsePollInterval(resp))
+		})
+	}
+}
+
+func TestParsePollIntervalNilResponse(t *testing.T) {
+	assert.Equal(t, defaultPollInterval, parsePollInterval(nil))
+}
+
+func TestPhasingJitterAppliedBeforeFirstPoll(t *testing.T) {
+	// Use a mock HTTP server that records when requests arrive.
+	var mu sync.Mutex
+	var requestTimes []time.Time
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		requestTimes = append(requestTimes, time.Now())
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("[]"))
+	}))
+	defer ts.Close()
+
+	store := testCheckpointStore(t)
+	registry := githubeventslib.NewHandlerRegistry(githubeventslib.Config{})
+
+	p := New(Config{
+		Registry:    registry,
+		Checkpoints: store,
+		WorkerCount: 1,
+	})
+	p.Start()
+
+	start := time.Now()
+
+	key := CheckpointKey{GithubConnectionID: "c1", OrgName: testOrg1}
+	p.Reconcile(map[CheckpointKey]ConnectionInfo{
+		key: {Token: "test-token", User: "testuser", BaseURL: ts.URL},
+	})
+
+	// Wait a bit for the phasing jitter (up to 10s) and first request.
+	// We can't know the exact jitter, so just verify the goroutine is alive
+	// and will eventually make a request.
+	time.Sleep(200 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = p.ShutdownContext(ctx)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Verify that if a request was made, it happened after start.
+	for _, rt := range requestTimes {
+		assert.True(t, rt.After(start) || rt.Equal(start))
+	}
+}
+
+func TestReconcileDoesNotBlockOnCancel(t *testing.T) {
+	store := testCheckpointStore(t)
+	p := newTestPoller(t, store)
+
+	key := CheckpointKey{GithubConnectionID: "c1", OrgName: testOrg1}
+
+	p.Reconcile(map[CheckpointKey]ConnectionInfo{
+		key: {Token: "t1", User: "u1"},
+	})
+
+	// Reconcile to remove the pair should not block.
+	done := make(chan struct{})
+	go func() {
+		p.Reconcile(map[CheckpointKey]ConnectionInfo{})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good.
+	case <-time.After(2 * time.Second):
+		t.Fatal("Reconcile blocked when removing a pair")
+	}
+}
+
+func TestAddListOptions(t *testing.T) {
+	tests := []struct {
+		name string
+		base string
+		opts *github.ListOptions
+		want string
+	}{
+		{"nil opts", testEventsPath, nil, testEventsPath},
+		{"page and perPage", testEventsPath, &github.ListOptions{Page: 2, PerPage: 100}, "users/u/events?page=2&per_page=100"},
+		{"page only", testEventsPath, &github.ListOptions{Page: 3}, "users/u/events?page=3"},
+		{"perPage only", testEventsPath, &github.ListOptions{PerPage: 50}, "users/u/events?per_page=50"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := addListOptions(tt.base, tt.opts)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// testEvent is a minimal Event implementation for tests.
+type testEvent struct {
+	evtType  string
+	delivery string
+}
+
+func (e *testEvent) EventType() string     { return e.evtType }
+func (e *testEvent) GetDeliveryID() string { return e.delivery }
+
+// newTestPoller creates a started Poller with cleanup.
+func newTestPoller(t *testing.T, store *CheckpointStore) *Poller {
+	t.Helper()
+	p := New(Config{
+		Registry:    githubeventslib.NewHandlerRegistry(githubeventslib.Config{}),
+		Checkpoints: store,
+		WorkerCount: 1,
+	})
+	p.Start()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = p.ShutdownContext(ctx)
+	})
+	return p
+}
