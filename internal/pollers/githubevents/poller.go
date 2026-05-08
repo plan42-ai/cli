@@ -315,6 +315,8 @@ func (p *Poller) processPage(ctx context.Context, _ CheckpointKey, events []*git
 		switch p := payload.(type) {
 		case *github.IssueCommentEvent:
 			sharedEvt = translateIssueComment(evt, p)
+		case *github.PullRequestReviewEvent:
+			sharedEvt = translatePullRequestReview(evt, p)
 		case *github.PullRequestReviewCommentEvent:
 			sharedEvt = translatePullRequestReviewComment(evt, p)
 		default:

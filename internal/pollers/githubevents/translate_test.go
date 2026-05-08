@@ -232,3 +232,85 @@ func TestTranslatePullRequestReviewComment_AllFields(t *testing.T) {
 	assert.Equal(t, "acme", evt.Repository.Org)
 	assert.Equal(t, "api", evt.Repository.Name)
 }
+
+func TestTranslatePullRequestReview_NilBody(t *testing.T) {
+	t.Parallel()
+
+	env := &github.Event{
+		Repo: &github.Repository{Name: github.Ptr("plan42/runner")},
+	}
+
+	payload := &github.PullRequestReviewEvent{
+		Action: github.Ptr("submitted"),
+		Review: &github.PullRequestReview{
+			Body: nil,
+			User: &github.User{Login: github.Ptr("reviewer")},
+		},
+		PullRequest: &github.PullRequest{
+			ID:     github.Ptr(int64(9001)),
+			Number: github.Ptr(101),
+			State:  github.Ptr("open"),
+			User:   &github.User{Login: github.Ptr("author")},
+		},
+	}
+
+	evt := translatePullRequestReview(env, payload)
+
+	_, err := uuid.Parse(evt.GetDeliveryID())
+	require.NoError(t, err)
+
+	assert.Equal(t, "pull_request_review", evt.EventType())
+	assert.Equal(t, "submitted", evt.Action)
+	assert.Nil(t, evt.Review.Body)
+	assert.Equal(t, "reviewer", evt.Review.Login)
+
+	assert.Equal(t, int64(9001), evt.PullRequest.ID)
+	assert.Equal(t, 101, evt.PullRequest.Number)
+	assert.Equal(t, "open", evt.PullRequest.State)
+	assert.Equal(t, "author", evt.PullRequest.Login)
+
+	assert.Equal(t, "plan42/runner", evt.Repository.FullName)
+	assert.Equal(t, "plan42", evt.Repository.Org)
+	assert.Equal(t, "runner", evt.Repository.Name)
+}
+
+func TestTranslatePullRequestReview_WithBodyCopiesPointer(t *testing.T) {
+	t.Parallel()
+
+	body := "LGTM"
+	env := &github.Event{
+		Repo: &github.Repository{Name: github.Ptr("acme/backend")},
+	}
+	payload := &github.PullRequestReviewEvent{
+		Action: github.Ptr("submitted"),
+		Review: &github.PullRequestReview{
+			Body: &body,
+			User: &github.User{Login: github.Ptr("reviewer")},
+		},
+		PullRequest: &github.PullRequest{
+			ID:     github.Ptr(int64(42)),
+			Number: github.Ptr(5),
+			State:  github.Ptr("open"),
+			User:   &github.User{Login: github.Ptr("author")},
+		},
+	}
+	sourceBodyPtr := payload.GetReview().Body
+
+	evt := translatePullRequestReview(env, payload)
+
+	_, err := uuid.Parse(evt.GetDeliveryID())
+	require.NoError(t, err)
+
+	require.NotNil(t, evt.Review.Body)
+	assert.Equal(t, body, *evt.Review.Body)
+	assert.NotSame(t, sourceBodyPtr, evt.Review.Body, "body pointer should be copied")
+
+	assert.Equal(t, int64(42), evt.PullRequest.ID)
+	assert.Equal(t, 5, evt.PullRequest.Number)
+	assert.Equal(t, "open", evt.PullRequest.State)
+	assert.Equal(t, "author", evt.PullRequest.Login)
+
+	assert.Equal(t, "acme/backend", evt.Repository.FullName)
+	assert.Equal(t, "acme", evt.Repository.Org)
+	assert.Equal(t, "backend", evt.Repository.Name)
+}
