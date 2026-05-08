@@ -2,6 +2,7 @@ package githubevents
 
 import (
 	"testing"
+	"time"
 
 	"github.com/google/go-github/v81/github"
 	"github.com/google/uuid"
@@ -313,4 +314,231 @@ func TestTranslatePullRequestReview_WithBodyCopiesPointer(t *testing.T) {
 	assert.Equal(t, "acme/backend", evt.Repository.FullName)
 	assert.Equal(t, "acme", evt.Repository.Org)
 	assert.Equal(t, "backend", evt.Repository.Name)
+}
+
+func TestTranslatePullRequest_AllFields(t *testing.T) {
+	t.Parallel()
+
+	updatedAt := time.Date(2025, 3, 15, 12, 30, 0, 0, time.UTC)
+
+	env := &github.Event{
+		Repo: &github.Repository{Name: github.Ptr("acme/backend")},
+	}
+
+	payload := &github.PullRequestEvent{
+		Action: github.Ptr("opened"),
+		Number: github.Ptr(7),
+		PullRequest: &github.PullRequest{
+			ID:        github.Ptr(int64(123456)),
+			Number:    github.Ptr(7),
+			State:     github.Ptr("open"),
+			Merged:    github.Ptr(false),
+			Draft:     github.Ptr(false),
+			HTMLURL:   github.Ptr("https://github.com/acme/backend/pull/7"),
+			UpdatedAt: &github.Timestamp{Time: updatedAt},
+			User:      &github.User{Login: github.Ptr("alice")},
+		},
+	}
+
+	evt := translatePullRequest(env, payload)
+
+	_, err := uuid.Parse(evt.GetDeliveryID())
+	require.NoError(t, err, "delivery ID should be a valid UUID")
+	assert.NotEmpty(t, evt.GetDeliveryID())
+
+	assert.Equal(t, "pull_request", evt.EventType())
+	assert.Equal(t, "opened", evt.Action)
+	assert.Equal(t, 7, evt.Number)
+
+	assert.Equal(t, int64(123456), evt.PullRequest.ID)
+	assert.Equal(t, 7, evt.PullRequest.Number)
+	assert.Equal(t, "open", evt.PullRequest.State)
+	assert.False(t, evt.PullRequest.Merged)
+	assert.False(t, evt.PullRequest.Draft)
+	assert.Equal(t, "https://github.com/acme/backend/pull/7", evt.PullRequest.HTMLURL)
+	require.NotNil(t, evt.PullRequest.UpdatedAt)
+	assert.True(t, updatedAt.Equal(*evt.PullRequest.UpdatedAt))
+	assert.Equal(t, "alice", evt.PullRequest.Login)
+
+	assert.Equal(t, "acme/backend", evt.Repository.FullName)
+	assert.Equal(t, "acme", evt.Repository.Org)
+	assert.Equal(t, "backend", evt.Repository.Name)
+}
+
+func TestTranslatePullRequest_UpdatedAt_NilTimestamp(t *testing.T) {
+	t.Parallel()
+
+	env := &github.Event{
+		Repo: &github.Repository{Name: github.Ptr("org/repo")},
+	}
+	payload := &github.PullRequestEvent{
+		Action: github.Ptr("closed"),
+		Number: github.Ptr(1),
+		PullRequest: &github.PullRequest{
+			ID:        github.Ptr(int64(1)),
+			UpdatedAt: nil,
+			User:      &github.User{},
+		},
+	}
+
+	evt := translatePullRequest(env, payload)
+	assert.Nil(t, evt.PullRequest.UpdatedAt, "nil timestamp should produce nil UpdatedAt")
+}
+
+func TestTranslatePullRequest_UpdatedAt_ZeroTimestamp(t *testing.T) {
+	t.Parallel()
+
+	env := &github.Event{
+		Repo: &github.Repository{Name: github.Ptr("org/repo")},
+	}
+	payload := &github.PullRequestEvent{
+		Action: github.Ptr("synchronize"),
+		Number: github.Ptr(2),
+		PullRequest: &github.PullRequest{
+			ID:        github.Ptr(int64(2)),
+			UpdatedAt: &github.Timestamp{Time: time.Time{}},
+			User:      &github.User{},
+		},
+	}
+
+	evt := translatePullRequest(env, payload)
+	assert.Nil(t, evt.PullRequest.UpdatedAt, "zero-value timestamp should produce nil UpdatedAt")
+}
+
+func TestTranslatePullRequest_UpdatedAt_ValidTimestamp(t *testing.T) {
+	t.Parallel()
+
+	ts := time.Date(2025, 7, 1, 8, 0, 0, 0, time.UTC)
+	env := &github.Event{
+		Repo: &github.Repository{Name: github.Ptr("org/repo")},
+	}
+	payload := &github.PullRequestEvent{
+		Action: github.Ptr("reopened"),
+		Number: github.Ptr(3),
+		PullRequest: &github.PullRequest{
+			ID:        github.Ptr(int64(3)),
+			UpdatedAt: &github.Timestamp{Time: ts},
+			User:      &github.User{},
+		},
+	}
+
+	evt := translatePullRequest(env, payload)
+	require.NotNil(t, evt.PullRequest.UpdatedAt)
+	assert.True(t, ts.Equal(*evt.PullRequest.UpdatedAt))
+}
+
+func TestTranslatePullRequest_StateCombinations(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		state  string
+		merged bool
+		draft  bool
+	}{
+		{"merged and closed", "closed", true, false},
+		{"draft and open", "open", false, true},
+		{"closed not merged", "closed", false, false},
+		{"open not draft", "open", false, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			env := &github.Event{
+				Repo: &github.Repository{Name: github.Ptr("org/repo")},
+			}
+			payload := &github.PullRequestEvent{
+				Action: github.Ptr("closed"),
+				Number: github.Ptr(1),
+				PullRequest: &github.PullRequest{
+					ID:     github.Ptr(int64(1)),
+					Number: github.Ptr(1),
+					State:  github.Ptr(tt.state),
+					Merged: github.Ptr(tt.merged),
+					Draft:  github.Ptr(tt.draft),
+					User:   &github.User{Login: github.Ptr("user")},
+				},
+			}
+
+			evt := translatePullRequest(env, payload)
+
+			assert.Equal(t, tt.state, evt.PullRequest.State)
+			assert.Equal(t, tt.merged, evt.PullRequest.Merged)
+			assert.Equal(t, tt.draft, evt.PullRequest.Draft)
+		})
+	}
+}
+
+func TestTranslatePullRequest_RepoSplitting(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		repoName string
+		wantFull string
+		wantOrg  string
+		wantName string
+	}{
+		{
+			name:     "standard owner/repo",
+			repoName: "plan42/cli",
+			wantFull: "plan42/cli",
+			wantOrg:  "plan42",
+			wantName: "cli",
+		},
+		{
+			name:     "hyphenated names",
+			repoName: "my-org/my-repo",
+			wantFull: "my-org/my-repo",
+			wantOrg:  "my-org",
+			wantName: "my-repo",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			env := &github.Event{
+				Repo: &github.Repository{Name: github.Ptr(tt.repoName)},
+			}
+			payload := &github.PullRequestEvent{
+				Action:      github.Ptr("opened"),
+				Number:      github.Ptr(1),
+				PullRequest: &github.PullRequest{User: &github.User{}},
+			}
+
+			evt := translatePullRequest(env, payload)
+
+			assert.Equal(t, tt.wantFull, evt.Repository.FullName)
+			assert.Equal(t, tt.wantOrg, evt.Repository.Org)
+			assert.Equal(t, tt.wantName, evt.Repository.Name)
+		})
+	}
+}
+
+func TestTranslatePullRequest_DeliveryIDIsUniqueUUID(t *testing.T) {
+	t.Parallel()
+
+	env := &github.Event{
+		Repo: &github.Repository{Name: github.Ptr("o/r")},
+	}
+	payload := &github.PullRequestEvent{
+		Action:      github.Ptr("opened"),
+		Number:      github.Ptr(1),
+		PullRequest: &github.PullRequest{User: &github.User{}},
+	}
+
+	evt1 := translatePullRequest(env, payload)
+	evt2 := translatePullRequest(env, payload)
+
+	_, err1 := uuid.Parse(evt1.GetDeliveryID())
+	require.NoError(t, err1)
+	_, err2 := uuid.Parse(evt2.GetDeliveryID())
+	require.NoError(t, err2)
+
+	assert.NotEqual(t, evt1.GetDeliveryID(), evt2.GetDeliveryID(),
+		"each call should generate a fresh UUID")
 }

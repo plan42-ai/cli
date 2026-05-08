@@ -2,6 +2,7 @@ package githubevents
 
 import (
 	"strings"
+	"time"
 
 	"github.com/google/go-github/v81/github"
 	"github.com/google/uuid"
@@ -75,6 +76,38 @@ func translatePullRequestReview(env *github.Event, payload *github.PullRequestRe
 		},
 		Repository: repoFromEnvelope(env),
 	}
+}
+
+// translatePullRequest converts a go-github Events API envelope and parsed
+// PullRequestEvent payload into the shared library's PullRequestEvent.
+// Field mapping follows design.md Section 11.5 (runner source column).
+func translatePullRequest(env *github.Event, payload *github.PullRequestEvent) *githubeventslib.PullRequestEvent {
+	return &githubeventslib.PullRequestEvent{
+		EventBase: githubeventslib.EventBase{DeliveryID: uuid.New().String()},
+		Action:    payload.GetAction(),
+		Number:    payload.GetNumber(),
+		PullRequest: githubeventslib.PullRequest{
+			ID:        payload.GetPullRequest().GetID(),
+			Number:    payload.GetPullRequest().GetNumber(),
+			State:     payload.GetPullRequest().GetState(),
+			Merged:    payload.GetPullRequest().GetMerged(),
+			Draft:     payload.GetPullRequest().GetDraft(),
+			HTMLURL:   payload.GetPullRequest().GetHTMLURL(),
+			UpdatedAt: timestampToTimePtr(payload.GetPullRequest().UpdatedAt),
+			Login:     payload.GetPullRequest().GetUser().GetLogin(),
+		},
+		Repository: repoFromEnvelope(env),
+	}
+}
+
+// timestampToTimePtr converts a *github.Timestamp to a *time.Time. Returns nil
+// if the timestamp is nil or its embedded Time is the Go zero value.
+func timestampToTimePtr(ts *github.Timestamp) *time.Time {
+	if ts == nil || ts.IsZero() {
+		return nil
+	}
+	t := ts.Time
+	return &t
 }
 
 // repoFromEnvelope splits the Events API envelope's repo name ("owner/name")

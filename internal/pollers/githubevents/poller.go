@@ -319,8 +319,10 @@ func (p *Poller) processPage(ctx context.Context, _ CheckpointKey, events []*git
 			sharedEvt = translatePullRequestReview(evt, p)
 		case *github.PullRequestReviewCommentEvent:
 			sharedEvt = translatePullRequestReviewComment(evt, p)
+		case *github.PullRequestEvent:
+			sharedEvt = translatePullRequest(evt, p)
 		default:
-			// Event types the runner does not handle yet.
+			// Event types the runner does not handle.
 			continue
 		}
 
