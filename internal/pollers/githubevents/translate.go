@@ -49,6 +49,34 @@ func translatePullRequestReviewComment(env *github.Event, payload *github.PullRe
 	}
 }
 
+// translatePullRequestReview converts Events API envelopes plus
+// PullRequestReview payloads into shared library events per design
+// Section 11.4 (runner source column).
+func translatePullRequestReview(env *github.Event, payload *github.PullRequestReviewEvent) *githubeventslib.PullRequestReviewEvent {
+	review := payload.GetReview()
+	var reviewBody *string
+	if review != nil && review.Body != nil {
+		bodyCopy := review.GetBody()
+		reviewBody = &bodyCopy
+	}
+
+	return &githubeventslib.PullRequestReviewEvent{
+		EventBase: githubeventslib.EventBase{DeliveryID: uuid.New().String()},
+		Action:    payload.GetAction(),
+		Review: githubeventslib.Review{
+			Body:  reviewBody,
+			Login: review.GetUser().GetLogin(),
+		},
+		PullRequest: githubeventslib.PullRequest{
+			ID:     payload.GetPullRequest().GetID(),
+			Number: payload.GetPullRequest().GetNumber(),
+			State:  payload.GetPullRequest().GetState(),
+			Login:  payload.GetPullRequest().GetUser().GetLogin(),
+		},
+		Repository: repoFromEnvelope(env),
+	}
+}
+
 // repoFromEnvelope splits the Events API envelope's repo name ("owner/name")
 // into the shared library's Repository struct. The Events API envelope's
 // Repo.Name carries the "owner/name" form; FullName and Owner are nil.
