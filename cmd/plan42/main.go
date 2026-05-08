@@ -129,6 +129,7 @@ func forwardToSibling(execName string, commandDepth int) error {
 		execName,
 	}
 	args = append(args, os.Args[commandDepth:]...)
+	// #nosec G702 -- Forwarding to sibling binary is intentional for CLI subcommands.
 	err = syscall.Exec(execPath, args, os.Environ())
 	if err != nil {
 		return err
@@ -363,8 +364,7 @@ func viewLogFile(logPath string, follow bool) error {
 		return fmt.Errorf("failed to create pager pipe: %w", err)
 	}
 
-	// #nosec: G204 : Subprocess launched with a potential tainted input or cmd arguments
-	// #    This is on purpose. We execute the PAGER that it configured in the users environment.
+	// #nosec G204,G702 -- executing user-configured pager command is expected for log viewing.
 	pagerCmd := exec.Command(pagerArgs[0], pagerArgs[1:]...)
 	pagerCmd.Stdin = reader
 	pagerCmd.Stdout = os.Stdout
