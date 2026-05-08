@@ -304,19 +304,30 @@ func (p *Poller) processPage(ctx context.Context, _ CheckpointKey, events []*git
 			firstID = evt.GetID()
 		}
 
-		// Parse the payload. The actual type-switch and translation to shared
-		// library events will be added in subsequent tasks.
-		_, parseErr := evt.ParsePayload()
+		payload, parseErr := evt.ParsePayload()
 		if parseErr != nil {
 			slog.Error("github events poller: failed to parse payload",
 				"eventID", evt.GetID(), "type", evt.GetType(), "error", parseErr)
 			continue
 		}
 
-		// TODO(event-translation): type-switch on parsed payload, translate to
-		// shared library Event, and enqueue via p.enqueue(ctx, sharedEvt).
-		// For now all events are skipped until the translation task lands.
-		_ = ctx
+		var sharedEvt githubeventslib.Event
+		switch p := payload.(type) {
+		case *github.IssueCommentEvent:
+			sharedEvt = translateIssueComment(evt, p)
+		default:
+			// Event types the runner does not handle yet.
+			continue
+		}
+
+		slog.Debug("github events poller: dispatching event",
+			"deliveryID", sharedEvt.GetDeliveryID(),
+			"eventType", sharedEvt.EventType(),
+			"eventID", evt.GetID(),
+		)
+		if err := p.enqueue(ctx, sharedEvt); err != nil {
+			return
+		}
 
 		count++
 	}
