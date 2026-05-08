@@ -191,3 +191,44 @@ func TestTranslateIssueComment_NilFields(t *testing.T) {
 	assert.False(t, evt.Issue.IsPullRequest)
 	assert.Equal(t, "", evt.Repository.FullName)
 }
+
+func TestTranslatePullRequestReviewComment_AllFields(t *testing.T) {
+	t.Parallel()
+
+	env := &github.Event{
+		Repo: &github.Repository{Name: github.Ptr("acme/api")},
+	}
+
+	payload := &github.PullRequestReviewCommentEvent{
+		Action: github.Ptr("created"),
+		Comment: &github.PullRequestComment{
+			Body: github.Ptr("/Plan42 rerun"),
+			User: &github.User{Login: github.Ptr("reviewer")},
+		},
+		PullRequest: &github.PullRequest{
+			ID:     github.Ptr(int64(1234)),
+			Number: github.Ptr(56),
+			State:  github.Ptr("open"),
+			User:   &github.User{Login: github.Ptr("author")},
+		},
+	}
+
+	evt := translatePullRequestReviewComment(env, payload)
+
+	_, err := uuid.Parse(evt.GetDeliveryID())
+	require.NoError(t, err)
+
+	assert.Equal(t, "pull_request_review_comment", evt.EventType())
+	assert.Equal(t, "created", evt.Action)
+	assert.Equal(t, "/Plan42 rerun", evt.Comment.Body)
+	assert.Equal(t, "reviewer", evt.Comment.Login)
+
+	assert.Equal(t, int64(1234), evt.PullRequest.ID)
+	assert.Equal(t, 56, evt.PullRequest.Number)
+	assert.Equal(t, "open", evt.PullRequest.State)
+	assert.Equal(t, "author", evt.PullRequest.Login)
+
+	assert.Equal(t, "acme/api", evt.Repository.FullName)
+	assert.Equal(t, "acme", evt.Repository.Org)
+	assert.Equal(t, "api", evt.Repository.Name)
+}

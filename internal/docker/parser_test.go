@@ -8,6 +8,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	registryDocker      = "docker.io"
+	repositoryUbuntu    = "ubuntu"
+	repositoryFooBarBaz = "foo/bar/baz"
+)
+
 func TestSuccess(t *testing.T) {
 	t.Parallel()
 	testCases := []struct {
@@ -17,34 +23,34 @@ func TestSuccess(t *testing.T) {
 	}{
 		{
 			name:  "infer registry and tag",
-			value: "docker.io/ubuntu",
+			value: registryDocker + "/" + repositoryUbuntu,
 			expected: docker.ImageURI{
-				Registry:   util.Pointer("docker.io"),
-				Repository: "ubuntu",
+				Registry:   util.Pointer(registryDocker),
+				Repository: repositoryUbuntu,
 			},
 		},
 		{
 			name:  "explicit registry",
-			value: "docker.io/docker.io/ubuntu",
+			value: registryDocker + "/" + registryDocker + "/" + repositoryUbuntu,
 			expected: docker.ImageURI{
-				Registry:   util.Pointer("docker.io"),
-				Repository: "docker.io/ubuntu",
+				Registry:   util.Pointer(registryDocker),
+				Repository: registryDocker + "/" + repositoryUbuntu,
 			},
 		},
 		{
 			name:  "registry port",
-			value: "docker.io:443/ubuntu",
+			value: registryDocker + ":443/" + repositoryUbuntu,
 			expected: docker.ImageURI{
-				Registry:     util.Pointer("docker.io"),
+				Registry:     util.Pointer(registryDocker),
 				RegistryPort: util.Pointer("443"),
-				Repository:   "ubuntu",
+				Repository:   repositoryUbuntu,
 			},
 		},
 		{
 			name:  "namespace without registry",
-			value: "foo/bar/baz",
+			value: repositoryFooBarBaz,
 			expected: docker.ImageURI{
-				Repository: "foo/bar/baz",
+				Repository: repositoryFooBarBaz,
 			},
 		},
 		{
@@ -65,33 +71,33 @@ func TestSuccess(t *testing.T) {
 		},
 		{
 			name:  "repository namespace and tag 2",
-			value: "foo/bar/baz:latest",
+			value: repositoryFooBarBaz + ":latest",
 			expected: docker.ImageURI{
-				Repository: "foo/bar/baz",
+				Repository: repositoryFooBarBaz,
 				Tag:        util.Pointer("latest"),
 			},
 		},
 		{
 			name:  "registry and tag",
-			value: "docker.io/ubuntu:latest",
+			value: registryDocker + "/" + repositoryUbuntu + ":latest",
 			expected: docker.ImageURI{
-				Registry:   util.Pointer("docker.io"),
-				Repository: "ubuntu",
+				Registry:   util.Pointer(registryDocker),
+				Repository: repositoryUbuntu,
 				Tag:        util.Pointer("latest"),
 			},
 		},
 		{
 			name:  "repository with dot",
-			value: "docker.io",
+			value: registryDocker,
 			expected: docker.ImageURI{
-				Repository: "docker.io",
+				Repository: registryDocker,
 			},
 		},
 		{
 			name:  "repository with dot and tag",
-			value: "docker.io:443",
+			value: registryDocker + ":443",
 			expected: docker.ImageURI{
-				Repository: "docker.io",
+				Repository: registryDocker,
 				Tag:        util.Pointer("443"),
 			},
 		},
