@@ -202,16 +202,10 @@ func (s *CheckpointStore) watchTimer() {
 
 // flush writes the in-memory checkpoint map to disk atomically.
 func (s *CheckpointStore) flush() {
-	s.mu.Lock()
-	s.stopped = true
-	if !s.dirty {
-		s.mu.Unlock()
+	snapshot, wasDirty := s.snapshot()
+	if !wasDirty {
 		return
 	}
-
-	snapshot := s.snapshotLocked()
-	s.dirty = false
-	s.mu.Unlock()
 
 	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
@@ -236,24 +230,29 @@ func (s *CheckpointStore) retryAfterFailure() {
 	s.stopped = false
 }
 
-// snapshotLocked returns a serializable copy of the entries map.
-// Must be called with s.mu held.
-func (s *CheckpointStore) snapshotLocked() map[string]checkpointFileEntry {
+// snapshot atomically marks the timer as stopped, checks the dirty flag, and
+// if dirty returns a serializable copy of the entries map with dirty cleared.
+// Returns (nil, false) when no flush is needed.
+func (s *CheckpointStore) snapshot() (map[string]checkpointFileEntry, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stopped = true
+	if !s.dirty {
+		return nil, false
+	}
+	s.dirty = false
 	out := make(map[string]checkpointFileEntry, len(s.entries))
 	for k, v := range s.entries {
 		out[compositeKey(k)] = checkpointFileEntry(v)
 	}
-	return out
+	return out, true
 }
 
 // Flush is called during runner shutdown. It cancels the watch goroutine,
 // stops the debounce timer, waits for any in-flight timer-scheduled flush,
 // and runs a synchronous final flush.
 func (s *CheckpointStore) Flush(ctx context.Context) error {
-	s.mu.Lock()
-	s.timer.Stop()
-	s.stopped = true
-	s.mu.Unlock()
+	s.stopTimer()
 
 	// Cancel the cg so the watchTimer goroutine exits, then wait for
 	// any in-flight flush to complete.
@@ -264,4 +263,12 @@ func (s *CheckpointStore) Flush(ctx context.Context) error {
 
 	s.flush()
 	return nil
+}
+
+// stopTimer stops the debounce timer under the mutex.
+func (s *CheckpointStore) stopTimer() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.timer.Stop()
+	s.stopped = true
 }
