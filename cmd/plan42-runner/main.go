@@ -13,7 +13,7 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/plan42-ai/cli/internal/cli/runner"
-	"github.com/plan42-ai/cli/internal/poller"
+	"github.com/plan42-ai/cli/internal/pollers/messages"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/log"
 	"github.com/plan42-ai/openid/jwt"
@@ -34,7 +34,7 @@ func main() {
 		slog.Error("error extracting params from token", "error", err)
 		panic(util.ExitCode(2))
 	}
-	p := poller.New(options.Client, tokenID, runnerID, options.PollerOptions()...)
+	p := messages.New(options.Client, tokenID, runnerID, options.PollerOptions()...)
 	defer util.Close(p)
 
 	sigCh := make(chan os.Signal, 1)

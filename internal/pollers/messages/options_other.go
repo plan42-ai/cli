@@ -1,6 +1,6 @@
 //go:build !darwin
 
-package poller
+package messages
 
 type PlatformFields struct {
 }

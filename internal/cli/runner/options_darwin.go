@@ -12,7 +12,7 @@ import (
 	"github.com/plan42-ai/cli/internal/p42runtime"
 	"github.com/plan42-ai/cli/internal/p42runtime/apple"
 	"github.com/plan42-ai/cli/internal/p42runtime/podman"
-	"github.com/plan42-ai/cli/internal/poller"
+	"github.com/plan42-ai/cli/internal/pollers/messages"
 )
 
 const runnerAgentLabel = "ai.plan42.runner"
@@ -24,12 +24,12 @@ type PlatformOptions struct {
 	runtime       string
 }
 
-func (p *PlatformOptions) PollerOptions(options []poller.Option) []poller.Option {
+func (p *PlatformOptions) PollerOptions(options []messages.Option) []messages.Option {
 	if p.Provider != nil {
-		options = append(options, poller.WithProvider(p.Provider))
+		options = append(options, messages.WithProvider(p.Provider))
 	}
-	options = append(options, poller.WithContainerPath(p.ContainerPath))
-	options = append(options, poller.WithPodmanPath(p.PodmanPath))
+	options = append(options, messages.WithContainerPath(p.ContainerPath))
+	options = append(options, messages.WithPodmanPath(p.PodmanPath))
 	return options
 }
 
