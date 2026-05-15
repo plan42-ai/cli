@@ -67,7 +67,7 @@ type CheckpointStore struct {
 // NewCheckpointStore creates a CheckpointStore, loading any existing checkpoint
 // file from ~/.config/plan42-runner.checkpoint.json. A missing file is treated
 // as empty. An unparseable file is logged and treated as empty.
-func NewCheckpointStore(cg *concurrency.ContextGroup) (*CheckpointStore, error) {
+func NewCheckpointStore() (*CheckpointStore, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
@@ -79,13 +79,12 @@ func NewCheckpointStore(cg *concurrency.ContextGroup) (*CheckpointStore, error) 
 	}
 
 	path := filepath.Join(configDir, checkpointFileName)
-	return newCheckpointStoreFromPath(path, cg)
+	return newCheckpointStoreFromPath(path)
 }
 
 // newCheckpointStoreFromPath is the internal constructor that accepts an
-// explicit file path. The exported constructor computes the path from the
-// user's home directory.
-func newCheckpointStoreFromPath(path string, cg *concurrency.ContextGroup) (*CheckpointStore, error) {
+// explicit file path. It creates its own ContextGroup for the watchTimer.
+func newCheckpointStoreFromPath(path string) (*CheckpointStore, error) {
 	entries := make(map[CheckpointKey]Checkpoint)
 	data, err := os.ReadFile(path)
 	if err == nil {
@@ -100,6 +99,7 @@ func newCheckpointStoreFromPath(path string, cg *concurrency.ContextGroup) (*Che
 	timer := time.NewTimer(time.Duration(math.MaxInt64))
 	timer.Stop()
 
+	cg := concurrency.NewContextGroup()
 	s := &CheckpointStore{
 		entries: entries,
 		timer:   timer,
@@ -194,30 +194,34 @@ func (s *CheckpointStore) watchTimer() {
 			s.cg.Add(1)
 			go func() {
 				defer s.cg.Done()
-				s.flush()
+				s.flushWithRetry()
 			}()
 		}
 	}
 }
 
-// flush writes the in-memory checkpoint map to disk atomically.
-func (s *CheckpointStore) flush() {
+// flush writes the in-memory checkpoint map to disk atomically. Returns an
+// error if the snapshot is dirty and the write fails.
+func (s *CheckpointStore) flush() error {
 	snapshot, wasDirty := s.snapshot()
 	if !wasDirty {
-		return
+		return nil
 	}
 
 	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
-		slog.Error("failed to marshal checkpoint data", "error", err)
-		s.retryAfterFailure()
-		return
+		return err
 	}
 
-	if err := renameio.WriteFile(s.path, data, checkpointFilePerm); err != nil {
+	return renameio.WriteFile(s.path, data, checkpointFilePerm)
+}
+
+// flushWithRetry calls flush and on failure logs the error, re-marks dirty,
+// and reschedules the timer for a later retry.
+func (s *CheckpointStore) flushWithRetry() {
+	if err := s.flush(); err != nil {
 		slog.Error("failed to write checkpoint file", "path", s.path, "error", err)
 		s.retryAfterFailure()
-		return
 	}
 }
 
@@ -248,21 +252,22 @@ func (s *CheckpointStore) snapshot() (map[string]checkpointFileEntry, bool) {
 	return out, true
 }
 
-// Flush is called during runner shutdown. It cancels the watch goroutine,
-// stops the debounce timer, waits for any in-flight timer-scheduled flush,
-// and runs a synchronous final flush.
-func (s *CheckpointStore) Flush(ctx context.Context) error {
+// Shutdown stops the checkpoint store: cancels the watch goroutine, waits for
+// any in-flight timer-scheduled flush, and runs a synchronous final flush.
+func (s *CheckpointStore) Shutdown(ctx context.Context) error {
 	s.stopTimer()
-
-	// Cancel the cg so the watchTimer goroutine exits, then wait for
-	// any in-flight flush to complete.
 	s.cg.Cancel()
 	if err := s.cg.WaitContext(ctx); err != nil {
 		return err
 	}
+	return s.flush()
+}
 
-	s.flush()
-	return nil
+// ShutdownTimeout calls Shutdown with a timeout-bounded context.
+func (s *CheckpointStore) ShutdownTimeout(timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return s.Shutdown(ctx)
 }
 
 // stopTimer stops the debounce timer under the mutex.

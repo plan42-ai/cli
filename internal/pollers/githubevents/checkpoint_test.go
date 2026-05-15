@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/plan42-ai/concurrency"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,14 +22,11 @@ func newTestStore(t *testing.T) (*CheckpointStore, string) {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, checkpointFileName)
-	cg := concurrency.NewContextGroup()
-	t.Cleanup(func() {
-		cg.Cancel()
-		_ = cg.WaitTimeout(5 * time.Second)
-	})
-
-	store, err := newCheckpointStoreFromPath(path, cg)
+	store, err := newCheckpointStoreFromPath(path)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = store.ShutdownTimeout(5 * time.Second)
+	})
 	return store, path
 }
 
@@ -42,14 +38,11 @@ func newTestStoreWithFile(t *testing.T, data []byte) *CheckpointStore {
 	path := filepath.Join(dir, checkpointFileName)
 	require.NoError(t, os.WriteFile(path, data, 0600))
 
-	cg := concurrency.NewContextGroup()
-	t.Cleanup(func() {
-		cg.Cancel()
-		_ = cg.WaitTimeout(5 * time.Second)
-	})
-
-	store, err := newCheckpointStoreFromPath(path, cg)
+	store, err := newCheckpointStoreFromPath(path)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = store.ShutdownTimeout(5 * time.Second)
+	})
 	return store
 }
 
@@ -239,9 +232,8 @@ func TestAtomicWriteProducesCorrectFile(t *testing.T) {
 func TestShutdownFlushWritesPendingChanges(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, checkpointFileName)
-	cg := concurrency.NewContextGroup()
 
-	store, err := newCheckpointStoreFromPath(path, cg)
+	store, err := newCheckpointStoreFromPath(path)
 	require.NoError(t, err)
 
 	key := CheckpointKey{GithubConnectionID: "c1", OrgName: "o1"}
@@ -250,9 +242,7 @@ func TestShutdownFlushWritesPendingChanges(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Flush now cancels its own cg internally, so the watchTimer goroutine
-	// exits and WaitContext returns promptly.
-	err = store.Flush(ctx)
+	err = store.Shutdown(ctx)
 	require.NoError(t, err)
 
 	data, err := os.ReadFile(path)
@@ -290,14 +280,11 @@ func TestDirectoryCreation(t *testing.T) {
 	// NewCheckpointStore path by setting HOME.
 	t.Setenv("HOME", filepath.Join(dir, "home"))
 
-	cg := concurrency.NewContextGroup()
-	t.Cleanup(func() {
-		cg.Cancel()
-		_ = cg.WaitTimeout(5 * time.Second)
-	})
-
-	store, err := NewCheckpointStore(cg)
+	store, err := NewCheckpointStore()
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = store.ShutdownTimeout(5 * time.Second)
+	})
 
 	// Verify the config directory was created with correct permissions.
 	info, err := os.Stat(configDir)
@@ -345,7 +332,7 @@ func TestConcurrentAccess(t *testing.T) {
 	wg.Wait()
 	// If we get here without a race, the test passes. Flush to verify
 	// the store is still in a consistent state.
-	store.flush()
+	_ = store.flush()
 }
 
 func TestDebouncedFlushViaTimer(t *testing.T) {
@@ -353,14 +340,11 @@ func TestDebouncedFlushViaTimer(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, checkpointFileName)
 
-	cg := concurrency.NewContextGroup()
-	t.Cleanup(func() {
-		cg.Cancel()
-		_ = cg.WaitTimeout(5 * time.Second)
-	})
-
-	store, err := newCheckpointStoreFromPath(path, cg)
+	store, err := newCheckpointStoreFromPath(path)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = store.ShutdownTimeout(5 * time.Second)
+	})
 
 	key := CheckpointKey{GithubConnectionID: "c1", OrgName: "o1"}
 	store.Set(key, Checkpoint{LastEventID: "timer-test"})
@@ -390,8 +374,7 @@ func TestRoundTripThroughFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, checkpointFileName)
 
-	cg1 := concurrency.NewContextGroup()
-	store1, err := newCheckpointStoreFromPath(path, cg1)
+	store1, err := newCheckpointStoreFromPath(path)
 	require.NoError(t, err)
 
 	key := CheckpointKey{GithubConnectionID: "c1", OrgName: "o1"}
@@ -400,20 +383,14 @@ func TestRoundTripThroughFile(t *testing.T) {
 		ETag:             `"rt-etag"`,
 		PollIntervalSecs: 90,
 	})
-	store1.flush()
+	require.NoError(t, store1.flush())
+	_ = store1.ShutdownTimeout(2 * time.Second)
 
-	cg1.Cancel()
-	_ = cg1.WaitTimeout(2 * time.Second)
-
-	// Second store from the same file.
-	cg2 := concurrency.NewContextGroup()
-	t.Cleanup(func() {
-		cg2.Cancel()
-		_ = cg2.WaitTimeout(5 * time.Second)
-	})
-
-	store2, err := newCheckpointStoreFromPath(path, cg2)
+	store2, err := newCheckpointStoreFromPath(path)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = store2.ShutdownTimeout(5 * time.Second)
+	})
 
 	cp, ok := store2.Get(key)
 	require.True(t, ok)
