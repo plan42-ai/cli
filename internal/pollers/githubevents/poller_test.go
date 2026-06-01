@@ -425,3 +425,42 @@ func newTestPoller(t *testing.T, store *CheckpointStore) *Poller {
 	})
 	return p
 }
+
+func TestCollectNewEventsStopsAtCheckpoint(t *testing.T) {
+	events := []*github.Event{
+		{ID: github.Ptr("5")},
+		{ID: github.Ptr("4")},
+		{ID: github.Ptr("3")},
+		{ID: github.Ptr("2")},
+		{ID: github.Ptr("1")},
+	}
+
+	collected, hit := collectNewEvents(events, "3")
+	require.True(t, hit, "should hit checkpoint")
+	require.Len(t, collected, 2)
+	assert.Equal(t, "5", collected[0].GetID())
+	assert.Equal(t, "4", collected[1].GetID())
+}
+
+func TestCollectNewEventsNoCheckpoint(t *testing.T) {
+	events := []*github.Event{
+		{ID: github.Ptr("3")},
+		{ID: github.Ptr("2")},
+		{ID: github.Ptr("1")},
+	}
+
+	collected, hit := collectNewEvents(events, "")
+	require.False(t, hit)
+	require.Len(t, collected, 3)
+}
+
+func TestCollectNewEventsCheckpointNotFound(t *testing.T) {
+	events := []*github.Event{
+		{ID: github.Ptr("5")},
+		{ID: github.Ptr("4")},
+	}
+
+	collected, hit := collectNewEvents(events, "99")
+	require.False(t, hit, "checkpoint not in page")
+	require.Len(t, collected, 2)
+}

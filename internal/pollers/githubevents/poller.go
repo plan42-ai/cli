@@ -221,6 +221,20 @@ func (p *Poller) doPoll(ctx context.Context, key CheckpointKey, info ConnectionI
 
 	var events []*github.Event
 	resp, err := ghClient.Do(ctx, req, &events)
+
+	// go-github returns a non-nil error for 304 (CheckResponse treats non-2xx
+	// as errors), but the response is still populated. Handle 304 before the
+	// generic error path so we correctly update pollInterval.
+	if resp != nil && resp.StatusCode == http.StatusNotModified {
+		pollInterval := parsePollInterval(resp)
+		slog.Debug("github events poller: 304 Not Modified",
+			"connection", key.GithubConnectionID, "org", key.OrgName,
+			"pollInterval", pollInterval)
+		cp.PollIntervalSecs = int(pollInterval.Seconds())
+		p.checkpoints.Set(key, cp)
+		return
+	}
+
 	if err != nil {
 		if ctx.Err() != nil {
 			return
@@ -231,29 +245,19 @@ func (p *Poller) doPoll(ctx context.Context, key CheckpointKey, info ConnectionI
 	}
 
 	pollInterval := parsePollInterval(resp)
-
-	if resp.StatusCode == http.StatusNotModified {
-		slog.Debug("github events poller: 304 Not Modified",
-			"connection", key.GithubConnectionID, "org", key.OrgName,
-			"pollInterval", pollInterval)
-		cp.PollIntervalSecs = int(pollInterval.Seconds())
-		p.checkpoints.Set(key, cp)
-		return
-	}
-
 	newETag := resp.Header.Get("ETag")
+
+	// Collect all new events across pages before dispatching. The Events API
+	// returns newest-first; we reverse before dispatch so handlers see events
+	// in chronological order.
 	var firstEventID string
-	totalProcessed := 0
-	hitCheckpoint := false
-	paginationFailed := false
-
-	firstEventID, totalProcessed, hitCheckpoint = p.processPage(ctx, events, cp.LastEventID)
-	if ctx.Err() != nil {
-		return
+	if len(events) > 0 {
+		firstEventID = events[0].GetID()
 	}
+	collected, hitCheckpoint := collectNewEvents(events, cp.LastEventID)
+	totalFetched := len(collected)
 
-	// Paginate if the first page didn't reach the checkpoint.
-	for page := 2; !hitCheckpoint && len(events) > 0 && totalProcessed < maxEventsPerPoll; page++ {
+	for page := 2; !hitCheckpoint && len(events) > 0 && totalFetched < maxEventsPerPoll; page++ {
 		pageEvents, _, pageErr := p.fetchPage(ctx, ghClient, info.User, key.OrgName, page)
 		if pageErr != nil {
 			if ctx.Err() != nil {
@@ -262,27 +266,32 @@ func (p *Poller) doPoll(ctx context.Context, key CheckpointKey, info ConnectionI
 			slog.Error("github events poller: pagination failed",
 				"connection", key.GithubConnectionID, "org", key.OrgName,
 				"page", page, "error", pageErr)
-			paginationFailed = true
-			break
+			// Don't advance checkpoint; re-fetch on the next poll.
+			return
 		}
 		if len(pageEvents) == 0 {
 			break
 		}
-		_, n, hit := p.processPage(ctx, pageEvents, cp.LastEventID)
-		if ctx.Err() != nil {
-			return
-		}
-		totalProcessed += n
+		pageNew, hit := collectNewEvents(pageEvents, cp.LastEventID)
+		collected = append(collected, pageNew...)
+		totalFetched += len(pageNew)
 		hitCheckpoint = hit
 	}
 
-	// Don't advance the checkpoint if pagination failed before reaching the
-	// prior checkpoint event ID. Re-fetching on the next poll is safe because
-	// we haven't enqueued the missed events and the handlers are idempotent.
-	if paginationFailed && !hitCheckpoint {
-		slog.Warn("github events poller: skipping checkpoint advance due to pagination error",
-			"connection", key.GithubConnectionID, "org", key.OrgName)
-		return
+	// Dispatch events oldest-first so handlers see chronological order.
+	for i := len(collected) - 1; i >= 0; i-- {
+		sharedEvt, parseErr := handlers.ParseEventsAPI(collected[i])
+		if parseErr != nil {
+			slog.Error("github events poller: failed to parse payload",
+				"eventID", collected[i].GetID(), "type", collected[i].GetType(), "error", parseErr)
+			continue
+		}
+		if sharedEvt == nil {
+			continue
+		}
+		if err := p.enqueue(ctx, sharedEvt); err != nil {
+			return
+		}
 	}
 
 	if firstEventID == "" && cp.LastEventID != "" {
@@ -297,42 +306,20 @@ func (p *Poller) doPoll(ctx context.Context, key CheckpointKey, info ConnectionI
 
 	slog.Info("github events poller: poll complete",
 		"connection", key.GithubConnectionID, "org", key.OrgName,
-		"newEvents", totalProcessed,
+		"newEvents", len(collected),
 		"pollInterval", pollInterval)
 }
 
-// processPage processes a single page of events. It returns the first event's
-// ID (from the first call for page 1), the count of events processed, and
-// whether the checkpoint event ID was hit.
-func (p *Poller) processPage(ctx context.Context, events []*github.Event, lastEventID string) (firstID string, count int, hitCheckpoint bool) {
-	for i, evt := range events {
+// collectNewEvents walks a page of events and returns those that are newer than
+// lastEventID. The returned slice is in the same (newest-first) order as the
+// input. hitCheckpoint is true if lastEventID was found.
+func collectNewEvents(events []*github.Event, lastEventID string) (newEvents []*github.Event, hitCheckpoint bool) {
+	for _, evt := range events {
 		if evt.GetID() == lastEventID && lastEventID != "" {
 			hitCheckpoint = true
 			return
 		}
-		if i == 0 {
-			firstID = evt.GetID()
-		}
-
-		// Translate the Events API envelope into a shared library Event.
-		// Unsupported types return nil and are skipped.
-		sharedEvt, parseErr := handlers.ParseEventsAPI(evt)
-		if parseErr != nil {
-			slog.Error("github events poller: failed to parse payload",
-				"eventID", evt.GetID(), "type", evt.GetType(), "error", parseErr)
-			continue
-		}
-		if sharedEvt == nil {
-			// Unsupported event type; skip.
-			count++
-			continue
-		}
-
-		if err := p.enqueue(ctx, sharedEvt); err != nil {
-			return
-		}
-
-		count++
+		newEvents = append(newEvents, evt)
 	}
 	return
 }
