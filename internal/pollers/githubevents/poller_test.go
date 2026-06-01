@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/google/go-github/v81/github"
-	githubeventslib "github.com/plan42-ai/github-event-handlers"
-	"github.com/plan42-ai/github-event-handlers/githubclient"
+	ghclient "github.com/plan42-ai/github-event-handlers/github"
+	"github.com/plan42-ai/github-event-handlers/handlers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,7 +32,7 @@ func testCheckpointStore(t *testing.T) *CheckpointStore {
 func TestDefaultWorkerCountAndChannelBuffer(t *testing.T) {
 	store := testCheckpointStore(t)
 	p := New(Config{
-		Registry:    githubeventslib.NewHandlerRegistry(githubeventslib.Config{}),
+		Registry:    handlers.NewHandlerRegistry(handlers.Config{}),
 		Checkpoints: store,
 	})
 
@@ -43,7 +43,7 @@ func TestDefaultWorkerCountAndChannelBuffer(t *testing.T) {
 func TestCustomWorkerCountAndChannelBuffer(t *testing.T) {
 	store := testCheckpointStore(t)
 	p := New(Config{
-		Registry:      githubeventslib.NewHandlerRegistry(githubeventslib.Config{}),
+		Registry:      handlers.NewHandlerRegistry(handlers.Config{}),
 		Checkpoints:   store,
 		WorkerCount:   50,
 		ChannelBuffer: 80,
@@ -137,10 +137,10 @@ func TestNoGoroutineLeaksAfterReconcileRemovesPair(t *testing.T) {
 
 func TestDispatcherWorkersStartAndStop(t *testing.T) {
 	store := testCheckpointStore(t)
-	registry := githubeventslib.NewHandlerRegistry(githubeventslib.Config{})
+	registry := handlers.NewHandlerRegistry(handlers.Config{})
 
 	var handleCount atomic.Int64
-	registry.Register(testEventType, func(_ context.Context, _ githubeventslib.Event, _ githubclient.GithubAPI) {
+	registry.Register(testEventType, func(_ context.Context, _ handlers.Event, _ ghclient.API) {
 		handleCount.Add(1)
 	})
 
@@ -170,8 +170,8 @@ func TestBackpressureBlocksPollerButRespectsCancel(t *testing.T) {
 	store := testCheckpointStore(t)
 
 	// Create a slow handler that blocks until cancelled.
-	registry := githubeventslib.NewHandlerRegistry(githubeventslib.Config{})
-	registry.Register(testEventType, func(ctx context.Context, _ githubeventslib.Event, _ githubclient.GithubAPI) {
+	registry := handlers.NewHandlerRegistry(handlers.Config{})
+	registry.Register(testEventType, func(ctx context.Context, _ handlers.Event, _ ghclient.API) {
 		<-ctx.Done()
 	})
 
@@ -225,8 +225,8 @@ func TestShutdownDrainsChannelBeforeReturning(t *testing.T) {
 	var mu sync.Mutex
 	var events []string
 
-	registry := githubeventslib.NewHandlerRegistry(githubeventslib.Config{})
-	registry.Register(testEventType, func(_ context.Context, evt githubeventslib.Event, _ githubclient.GithubAPI) {
+	registry := handlers.NewHandlerRegistry(handlers.Config{})
+	registry.Register(testEventType, func(_ context.Context, evt handlers.Event, _ ghclient.API) {
 		mu.Lock()
 		defer mu.Unlock()
 		events = append(events, evt.GetDeliveryID())
@@ -326,7 +326,7 @@ func TestPhasingJitterAppliedBeforeFirstPoll(t *testing.T) {
 	defer ts.Close()
 
 	store := testCheckpointStore(t)
-	registry := githubeventslib.NewHandlerRegistry(githubeventslib.Config{})
+	registry := handlers.NewHandlerRegistry(handlers.Config{})
 
 	p := New(Config{
 		Registry:    registry,
@@ -418,7 +418,7 @@ func (e *testEvent) GetDeliveryID() string { return e.delivery }
 func newTestPoller(t *testing.T, store *CheckpointStore) *Poller {
 	t.Helper()
 	p := New(Config{
-		Registry:    githubeventslib.NewHandlerRegistry(githubeventslib.Config{}),
+		Registry:    handlers.NewHandlerRegistry(handlers.Config{}),
 		Checkpoints: store,
 		WorkerCount: 1,
 	})

@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/go-github/v81/github"
 	"github.com/plan42-ai/concurrency"
-	githubeventslib "github.com/plan42-ai/github-event-handlers"
-	"github.com/plan42-ai/github-event-handlers/githubclient"
+	ghclient "github.com/plan42-ai/github-event-handlers/github"
+	"github.com/plan42-ai/github-event-handlers/handlers"
 )
 
 const (
@@ -27,7 +27,7 @@ const (
 
 // Config holds the dependencies for the github events poller.
 type Config struct {
-	Registry      *githubeventslib.HandlerRegistry
+	Registry      *handlers.HandlerRegistry
 	Checkpoints   *CheckpointStore
 	WorkerCount   int // default 100
 	ChannelBuffer int // default 2 * WorkerCount
@@ -42,7 +42,7 @@ type pairState struct {
 // Poller implements the github events poller. It owns one polling goroutine per
 // (GithubConnectionID, OrgName) pair, a dispatch channel, and a worker pool.
 type Poller struct {
-	registry    *githubeventslib.HandlerRegistry
+	registry    *handlers.HandlerRegistry
 	checkpoints *CheckpointStore
 	workerCount int
 	chanBuf     int
@@ -51,7 +51,7 @@ type Poller struct {
 	cg *concurrency.ContextGroup
 
 	// Dispatch channel for events flowing from pollers to workers.
-	dispatchCh chan githubeventslib.Event
+	dispatchCh chan handlers.Event
 
 	// workerCg tracks worker goroutines separately so shutdown can close
 	// the channel between producers exiting and workers draining.
@@ -91,7 +91,7 @@ func New(cfg Config) *Poller {
 
 // Start launches the worker pool. Must be called before Reconcile.
 func (p *Poller) Start() {
-	p.dispatchCh = make(chan githubeventslib.Event, p.chanBuf)
+	p.dispatchCh = make(chan handlers.Event, p.chanBuf)
 	for range p.workerCount {
 		p.workerCg.Add(1)
 		go p.worker()
@@ -161,7 +161,7 @@ func (p *Poller) worker() {
 	defer p.workerCg.Done()
 	ctx := p.cg.Context()
 	for evt := range p.dispatchCh {
-		if err := p.registry.Handle(ctx, evt, (*githubclient.GithubClient)(nil)); err != nil {
+		if err := p.registry.Handle(ctx, evt, (*ghclient.Client)(nil)); err != nil {
 			slog.ErrorContext(ctx, "github events poller: handler error",
 				"deliveryID", evt.GetDeliveryID(),
 				"eventType", evt.EventType(),
@@ -291,9 +291,10 @@ func (p *Poller) doPoll(ctx context.Context, key CheckpointKey, info ConnectionI
 		"pollInterval", pollInterval)
 }
 
-// processPage processes a single page of events. It returns the first event's
-// ID (from the first call for page 1), the count of events processed, and
-// whether the checkpoint event ID was hit.
+// processPage processes a single page of events. It returns the first event's ID
+// (from the first call for page 1), the count of events walked (including skipped
+// unsupported types, so the 300-event cap applies to all events seen), and whether
+// the checkpoint event ID was hit.
 func (p *Poller) processPage(ctx context.Context, _ CheckpointKey, events []*github.Event, lastEventID string) (firstID string, count int, hitCheckpoint bool) {
 	for i, evt := range events {
 		if evt.GetID() == lastEventID && lastEventID != "" {
@@ -304,6 +305,11 @@ func (p *Poller) processPage(ctx context.Context, _ CheckpointKey, events []*git
 			firstID = evt.GetID()
 		}
 
+		// Count every event toward the page limit, regardless of whether
+		// it's a type we translate, so the 300-event cap is enforced
+		// against total API events seen rather than just translated ones.
+		count++
+
 		payload, parseErr := evt.ParsePayload()
 		if parseErr != nil {
 			slog.Error("github events poller: failed to parse payload",
@@ -311,7 +317,7 @@ func (p *Poller) processPage(ctx context.Context, _ CheckpointKey, events []*git
 			continue
 		}
 
-		var sharedEvt githubeventslib.Event
+		var sharedEvt handlers.Event
 		switch p := payload.(type) {
 		case *github.IssueCommentEvent:
 			sharedEvt = translateIssueComment(evt, p)
@@ -328,14 +334,12 @@ func (p *Poller) processPage(ctx context.Context, _ CheckpointKey, events []*git
 		if err := p.enqueue(ctx, sharedEvt); err != nil {
 			return
 		}
-
-		count++
 	}
 	return
 }
 
 // enqueue sends an event to the dispatch channel, respecting cancellation.
-func (p *Poller) enqueue(ctx context.Context, evt githubeventslib.Event) error {
+func (p *Poller) enqueue(ctx context.Context, evt handlers.Event) error {
 	select {
 	case p.dispatchCh <- evt:
 		return nil
@@ -458,7 +462,7 @@ func (p *Poller) WorkerCount() int { return p.workerCount }
 func (p *Poller) ChannelBuffer() int { return p.chanBuf }
 
 // DispatchCh returns the dispatch channel (for testing).
-func (p *Poller) DispatchCh() chan githubeventslib.Event { return p.dispatchCh }
+func (p *Poller) DispatchCh() chan handlers.Event { return p.dispatchCh }
 
 // PairKeys returns a snapshot of the current running pair keys (for testing).
 func (p *Poller) PairKeys() []CheckpointKey {
