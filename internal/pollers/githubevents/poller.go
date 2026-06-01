@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/go-github/v81/github"
 	"github.com/plan42-ai/concurrency"
-	githubeventslib "github.com/plan42-ai/github-event-handlers"
-	"github.com/plan42-ai/github-event-handlers/githubclient"
+	githubclient "github.com/plan42-ai/github-event-handlers/github"
+	githubeventslib "github.com/plan42-ai/github-event-handlers/handlers"
 )
 
 const (
@@ -118,7 +118,7 @@ func (p *Poller) ShutdownContext(ctx context.Context) error {
 		}
 
 		// Step 5: Flush checkpoints.
-		p.shutdownErr = p.checkpoints.Flush(ctx)
+		p.shutdownErr = p.checkpoints.Shutdown(ctx)
 	})
 	return p.shutdownErr
 }
@@ -161,7 +161,7 @@ func (p *Poller) worker() {
 	defer p.workerCg.Done()
 	ctx := p.cg.Context()
 	for evt := range p.dispatchCh {
-		if err := p.registry.Handle(ctx, evt, (*githubclient.GithubClient)(nil)); err != nil {
+		if err := p.registry.Handle(ctx, evt, githubclient.API(nil)); err != nil {
 			slog.ErrorContext(ctx, "github events poller: handler error",
 				"deliveryID", evt.GetDeliveryID(),
 				"eventType", evt.EventType(),
@@ -304,23 +304,13 @@ func (p *Poller) processPage(ctx context.Context, _ CheckpointKey, events []*git
 			firstID = evt.GetID()
 		}
 
-		payload, parseErr := evt.ParsePayload()
+		sharedEvt, parseErr := githubeventslib.ParseEventsAPI(evt)
 		if parseErr != nil {
 			slog.Error("github events poller: failed to parse payload",
 				"eventID", evt.GetID(), "type", evt.GetType(), "error", parseErr)
 			continue
 		}
-
-		var sharedEvt githubeventslib.Event
-		switch p := payload.(type) {
-		case *github.IssueCommentEvent:
-			sharedEvt = translateIssueComment(evt, p)
-		case *github.PullRequestReviewEvent:
-			sharedEvt = translatePullRequestReview(evt, p)
-		case *github.PullRequestReviewCommentEvent:
-			sharedEvt = translatePullRequestReviewComment(evt, p)
-		default:
-			// Event types the runner does not handle yet.
+		if sharedEvt == nil {
 			continue
 		}
 

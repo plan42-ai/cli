@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/google/go-github/v81/github"
-	githubeventslib "github.com/plan42-ai/github-event-handlers"
-	"github.com/plan42-ai/github-event-handlers/githubclient"
+	githubclient "github.com/plan42-ai/github-event-handlers/github"
+	githubeventslib "github.com/plan42-ai/github-event-handlers/handlers"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -140,7 +140,7 @@ func TestDispatcherWorkersStartAndStop(t *testing.T) {
 	registry := githubeventslib.NewHandlerRegistry(githubeventslib.Config{})
 
 	var handleCount atomic.Int64
-	registry.Register(testEventType, func(_ context.Context, _ githubeventslib.Event, _ githubclient.GithubAPI) {
+	registry.Register(testEventType, func(_ context.Context, _ githubeventslib.Event, _ githubclient.API) {
 		handleCount.Add(1)
 	})
 
@@ -171,7 +171,7 @@ func TestBackpressureBlocksPollerButRespectsCancel(t *testing.T) {
 
 	// Create a slow handler that blocks until cancelled.
 	registry := githubeventslib.NewHandlerRegistry(githubeventslib.Config{})
-	registry.Register(testEventType, func(ctx context.Context, _ githubeventslib.Event, _ githubclient.GithubAPI) {
+	registry.Register(testEventType, func(ctx context.Context, _ githubeventslib.Event, _ githubclient.API) {
 		<-ctx.Done()
 	})
 
@@ -226,7 +226,7 @@ func TestShutdownDrainsChannelBeforeReturning(t *testing.T) {
 	var events []string
 
 	registry := githubeventslib.NewHandlerRegistry(githubeventslib.Config{})
-	registry.Register(testEventType, func(_ context.Context, evt githubeventslib.Event, _ githubclient.GithubAPI) {
+	registry.Register(testEventType, func(_ context.Context, evt githubeventslib.Event, _ githubclient.API) {
 		mu.Lock()
 		defer mu.Unlock()
 		events = append(events, evt.GetDeliveryID())
