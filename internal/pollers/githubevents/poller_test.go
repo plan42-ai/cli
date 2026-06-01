@@ -29,28 +29,25 @@ func testCheckpointStore(t *testing.T) *CheckpointStore {
 	return store
 }
 
-func TestDefaultWorkerCountAndChannelBuffer(t *testing.T) {
+func TestDefaultWorkerCount(t *testing.T) {
 	store := testCheckpointStore(t)
 	p := New(Config{
 		Registry:    handlers.NewHandlerRegistry(handlers.Config{}),
 		Checkpoints: store,
 	})
 
-	assert.Equal(t, 100, p.WorkerCount(), "default worker count should be 100")
-	assert.Equal(t, 200, p.ChannelBuffer(), "default channel buffer should be 2 * workerCount")
+	assert.Equal(t, 100, p.workerCount, "default worker count should be 100")
 }
 
-func TestCustomWorkerCountAndChannelBuffer(t *testing.T) {
+func TestCustomWorkerCount(t *testing.T) {
 	store := testCheckpointStore(t)
 	p := New(Config{
-		Registry:      handlers.NewHandlerRegistry(handlers.Config{}),
-		Checkpoints:   store,
-		WorkerCount:   50,
-		ChannelBuffer: 80,
+		Registry:    handlers.NewHandlerRegistry(handlers.Config{}),
+		Checkpoints: store,
+		WorkerCount: 50,
 	})
 
-	assert.Equal(t, 50, p.WorkerCount())
-	assert.Equal(t, 80, p.ChannelBuffer())
+	assert.Equal(t, 50, p.workerCount)
 }
 
 func TestUpdateTargetsStartsGoroutinesForNewPairs(t *testing.T) {
@@ -145,16 +142,13 @@ func TestDispatcherWorkersStartAndStop(t *testing.T) {
 	})
 
 	p := New(Config{
-		Registry:      registry,
-		Checkpoints:   store,
-		WorkerCount:   3,
-		ChannelBuffer: 6,
+		Registry:    registry,
+		Checkpoints: store,
+		WorkerCount: 3,
 	})
-	p.Start()
-
 	// Send events through the dispatch channel directly.
 	for range 5 {
-		p.dispatchCh <- &testEvent{evtType: testEventType, delivery: "d1"}
+		p.eventCh <- &testEvent{evtType: testEventType, delivery: "d1"}
 	}
 
 	// Shut down and wait for workers to drain.
@@ -176,16 +170,15 @@ func TestBackpressureBlocksPollerButRespectsCancel(t *testing.T) {
 	})
 
 	p := New(Config{
-		Registry:      registry,
-		Checkpoints:   store,
-		WorkerCount:   1,
-		ChannelBuffer: 1,
+		Registry:    registry,
+		Checkpoints: store,
+		WorkerCount: 1,
 	})
-	p.Start()
 
-	// Fill the worker (1 event being processed) and the buffer (1 event buffered).
-	p.dispatchCh <- &testEvent{evtType: testEventType, delivery: "d1"}
-	p.dispatchCh <- &testEvent{evtType: testEventType, delivery: "d2"}
+	// Fill the worker (1 event being processed) and the buffer (2 events buffered).
+	p.eventCh <- &testEvent{evtType: testEventType, delivery: "d1"}
+	p.eventCh <- &testEvent{evtType: testEventType, delivery: "d2"}
+	p.eventCh <- &testEvent{evtType: testEventType, delivery: "d2b"}
 
 	// Now the channel is full. enqueue should block but respect cancellation.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -231,16 +224,14 @@ func TestShutdownDrainsChannelBeforeReturning(t *testing.T) {
 	})
 
 	p := New(Config{
-		Registry:      registry,
-		Checkpoints:   store,
-		WorkerCount:   2,
-		ChannelBuffer: 10,
+		Registry:    registry,
+		Checkpoints: store,
+		WorkerCount: 2,
 	})
-	p.Start()
 
 	// Enqueue some events.
 	for i := range 5 {
-		p.dispatchCh <- &testEvent{
+		p.eventCh <- &testEvent{
 			evtType:  testEventType,
 			delivery: string(rune('A' + i)),
 		}
@@ -330,7 +321,6 @@ func TestPhasingJitterAppliedBeforeFirstPoll(t *testing.T) {
 		Checkpoints: store,
 		WorkerCount: 1,
 	})
-	p.Start()
 
 	start := time.Now()
 
@@ -415,7 +405,6 @@ func newTestPoller(t *testing.T, store *CheckpointStore) *Poller {
 		Checkpoints: store,
 		WorkerCount: 1,
 	})
-	p.Start()
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

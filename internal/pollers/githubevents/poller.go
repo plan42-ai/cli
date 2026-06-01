@@ -17,7 +17,6 @@ import (
 )
 
 const (
-	defaultWorkerCount  = 100
 	defaultPollInterval = 60 * time.Second
 	maxPhasingJitter    = 10 * time.Second
 	maxEventsPerPoll    = 300
@@ -26,10 +25,9 @@ const (
 
 // Config holds the dependencies for the github events poller.
 type Config struct {
-	Registry      *handlers.HandlerRegistry
-	Checkpoints   *CheckpointStore
-	WorkerCount   int // default 100
-	ChannelBuffer int // default 2 * WorkerCount
+	Registry    *handlers.HandlerRegistry
+	Checkpoints *CheckpointStore
+	WorkerCount int // default 100
 }
 
 // pairState tracks a running per-pair polling goroutine.
@@ -38,16 +36,15 @@ type pairState struct {
 	info   ConnectionInfo
 }
 
-// Poller implements the github events poller. It owns one polling goroutine per
-// (GithubConnectionID, OrgName) pair, a dispatch channel, and a worker pool.
+// Poller owns one polling goroutine per (GithubConnectionID, OrgName) pair.
+// It collects events from the GitHub Events API and sends them to an event
+// channel. A separate Dispatcher reads from the channel and invokes handlers.
 type Poller struct {
-	registry    *handlers.HandlerRegistry
 	checkpoints *CheckpointStore
 	workerCount int
-	chanBuf     int
 
-	// cg owns the context shared by workers. Cancelling it aborts in-flight
-	// handler calls (used by Close for forced shutdown).
+	// cg owns the context shared by the dispatcher workers. Cancelling it
+	// aborts in-flight handler calls (used by Close for forced shutdown).
 	cg *concurrency.ContextGroup
 
 	// stopCh is closed to signal polling goroutines to stop producing.
@@ -56,15 +53,12 @@ type Poller struct {
 	stopCh   chan struct{}
 	stopOnce sync.Once
 
-	// Dispatch channel for events flowing from pollers to workers.
-	dispatchCh chan handlers.Event
-
-	// workerCg tracks worker goroutines separately so shutdown can close
-	// the channel between producers exiting and workers draining.
-	workerCg *concurrency.ContextGroup
+	// eventCh carries events from polling goroutines to the dispatcher.
+	eventCh    chan handlers.Event
+	dispatcher *Dispatcher
 
 	// pollerWg tracks polling goroutines so we can wait for them before
-	// closing the dispatch channel.
+	// closing the event channel.
 	pollerWg     sync.WaitGroup
 	shutdownOnce sync.Once
 	shutdownErr  error
@@ -74,39 +68,32 @@ type Poller struct {
 	pairs map[CheckpointKey]*pairState
 }
 
-// New creates a new github events poller. Call Start to launch the worker pool.
+// New creates a fully initialized Poller with its dispatcher worker pool
+// running. There is no separate Start method.
 func New(cfg Config) *Poller {
 	wc := cfg.WorkerCount
 	if wc <= 0 {
 		wc = defaultWorkerCount
 	}
-	cb := cfg.ChannelBuffer
-	if cb <= 0 {
-		cb = 2 * wc
-	}
+	cg := concurrency.NewContextGroup()
+	eventCh := make(chan handlers.Event, 2*wc)
 	return &Poller{
-		registry:    cfg.Registry,
 		checkpoints: cfg.Checkpoints,
 		workerCount: wc,
-		chanBuf:     cb,
-		cg:          concurrency.NewContextGroup(),
+		cg:          cg,
 		stopCh:      make(chan struct{}),
-		workerCg:    concurrency.NewContextGroup(),
+		eventCh:     eventCh,
+		dispatcher:  NewDispatcher(cfg.Registry, cg, eventCh, wc),
 		pairs:       make(map[CheckpointKey]*pairState),
 	}
 }
 
-// Start launches the worker pool. Must be called before UpdateTargets.
-func (p *Poller) Start() {
-	p.dispatchCh = make(chan handlers.Event, p.chanBuf)
-	for range p.workerCount {
-		p.workerCg.Add(1)
-		go p.worker()
-	}
-}
+// EventCh returns the channel that polling goroutines send events to and the
+// dispatcher reads from. Exposed for testing.
+func (p *Poller) EventCh() <-chan handlers.Event { return p.eventCh }
 
 // ShutdownContext performs a graceful shutdown: it stops all polling goroutines,
-// then lets workers drain the dispatch channel with a live context so in-flight
+// then lets workers drain the event channel with a live context so in-flight
 // handler calls can complete their API/database work. Finally it flushes
 // checkpoints. Safe to call multiple times.
 func (p *Poller) ShutdownContext(ctx context.Context) error {
@@ -118,11 +105,11 @@ func (p *Poller) ShutdownContext(ctx context.Context) error {
 		// Step 2: Wait for all polling goroutines to return.
 		p.pollerWg.Wait()
 
-		// Step 3: Close the dispatch channel (safe: all producers have exited).
-		close(p.dispatchCh)
+		// Step 3: Close the event channel (safe: all producers have exited).
+		close(p.eventCh)
 
-		// Step 4: Wait for workers to drain and exit.
-		if err := p.workerCg.WaitContext(ctx); err != nil {
+		// Step 4: Wait for dispatcher workers to drain and exit.
+		if err := p.dispatcher.Wait(ctx); err != nil {
 			p.shutdownErr = err
 			return
 		}
@@ -178,23 +165,6 @@ func (p *Poller) UpdateTargets(desired map[CheckpointKey]ConnectionInfo) {
 		go p.pollPair(ctx, key, info)
 		slog.Info("github events poller: starting pair",
 			"connection", key.GithubConnectionID, "org", key.OrgName)
-	}
-}
-
-// worker is the dispatch worker loop. Each worker reads events from dispatchCh
-// and calls HandlerRegistry.Handle. The context passed to handlers derives from
-// the component's parent context (not per-pair contexts).
-func (p *Poller) worker() {
-	defer p.workerCg.Done()
-	ctx := p.cg.Context()
-	for evt := range p.dispatchCh {
-		if err := p.registry.Handle(ctx, evt, nil); err != nil {
-			slog.ErrorContext(ctx, "github events poller: handler error",
-				"deliveryID", evt.GetDeliveryID(),
-				"eventType", evt.EventType(),
-				"error", err,
-			)
-		}
 	}
 }
 
@@ -317,7 +287,7 @@ func (p *Poller) doPoll(ctx context.Context, key CheckpointKey, info ConnectionI
 	totalFetched := len(collected)
 
 	for page := 2; !hitCheckpoint && len(events) > 0 && totalFetched < maxEventsPerPoll; page++ {
-		pageEvents, _, pageErr := p.fetchPage(ctx, ghClient, info.User, key.OrgName, page)
+		pageEvents, _, pageErr := fetchPage(ctx, ghClient, info.User, key.OrgName, page)
 		if pageErr != nil {
 			if ctx.Err() != nil {
 				return
@@ -383,11 +353,11 @@ func collectNewEvents(events []*github.Event, lastEventID string) (newEvents []*
 	return
 }
 
-// enqueue sends an event to the dispatch channel, respecting cancellation
+// enqueue sends an event to the event channel, respecting cancellation
 // and the stop signal.
 func (p *Poller) enqueue(ctx context.Context, evt handlers.Event) error {
 	select {
-	case p.dispatchCh <- evt:
+	case p.eventCh <- evt:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -397,7 +367,7 @@ func (p *Poller) enqueue(ctx context.Context, evt handlers.Event) error {
 }
 
 // fetchPage fetches a single page of events from the GitHub Events API.
-func (p *Poller) fetchPage(ctx context.Context, ghClient *github.Client, user, org string, page int) ([]*github.Event, *github.Response, error) {
+func fetchPage(ctx context.Context, ghClient *github.Client, user, org string, page int) ([]*github.Event, *github.Response, error) {
 	reqURL := fmt.Sprintf("users/%s/events/orgs/%s", user, org)
 	u := addListOptions(reqURL, &github.ListOptions{PerPage: eventsPageSize, Page: page})
 	req, err := ghClient.NewRequest("GET", u, nil)
@@ -502,15 +472,6 @@ func addListOptions(s string, opts *github.ListOptions) string {
 	}
 	return s + sep + params
 }
-
-// WorkerCount returns the configured worker count (for testing).
-func (p *Poller) WorkerCount() int { return p.workerCount }
-
-// ChannelBuffer returns the configured channel buffer size (for testing).
-func (p *Poller) ChannelBuffer() int { return p.chanBuf }
-
-// DispatchCh returns the dispatch channel (for testing).
-func (p *Poller) DispatchCh() chan handlers.Event { return p.dispatchCh }
 
 // PairKeys returns a snapshot of the current running pair keys (for testing).
 func (p *Poller) PairKeys() []CheckpointKey {
