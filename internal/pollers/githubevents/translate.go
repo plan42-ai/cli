@@ -5,7 +5,7 @@ import (
 
 	"github.com/google/go-github/v81/github"
 	"github.com/google/uuid"
-	githubeventslib "github.com/plan42-ai/github-event-handlers"
+	githubeventslib "github.com/plan42-ai/github-event-handlers/handlers"
 )
 
 // translateIssueComment converts a go-github Events API envelope and parsed

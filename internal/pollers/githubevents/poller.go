@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/go-github/v81/github"
 	"github.com/plan42-ai/concurrency"
-	githubeventslib "github.com/plan42-ai/github-event-handlers"
-	"github.com/plan42-ai/github-event-handlers/githubclient"
+	githubclient "github.com/plan42-ai/github-event-handlers/github"
+	githubeventslib "github.com/plan42-ai/github-event-handlers/handlers"
 )
 
 const (
@@ -161,7 +161,7 @@ func (p *Poller) worker() {
 	defer p.workerCg.Done()
 	ctx := p.cg.Context()
 	for evt := range p.dispatchCh {
-		if err := p.registry.Handle(ctx, evt, (*githubclient.GithubClient)(nil)); err != nil {
+		if err := p.registry.Handle(ctx, evt, githubclient.API(nil)); err != nil {
 			slog.ErrorContext(ctx, "github events poller: handler error",
 				"deliveryID", evt.GetDeliveryID(),
 				"eventType", evt.EventType(),
