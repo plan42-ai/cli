@@ -46,8 +46,15 @@ type Poller struct {
 	workerCount int
 	chanBuf     int
 
-	// Parent context group for the component's lifecycle.
+	// cg owns the context shared by workers. Cancelling it aborts in-flight
+	// handler calls (used by Close for forced shutdown).
 	cg *concurrency.ContextGroup
+
+	// stopCh is closed to signal polling goroutines to stop producing.
+	// Graceful shutdown closes stopCh without cancelling cg so workers
+	// drain with a live context.
+	stopCh   chan struct{}
+	stopOnce sync.Once
 
 	// Dispatch channel for events flowing from pollers to workers.
 	dispatchCh chan handlers.Event
@@ -83,6 +90,7 @@ func New(cfg Config) *Poller {
 		workerCount: wc,
 		chanBuf:     cb,
 		cg:          concurrency.NewContextGroup(),
+		stopCh:      make(chan struct{}),
 		workerCg:    concurrency.NewContextGroup(),
 		pairs:       make(map[CheckpointKey]*pairState),
 	}
@@ -97,12 +105,15 @@ func (p *Poller) Start() {
 	}
 }
 
-// ShutdownContext stops all polling goroutines, drains the dispatch channel
-// through the worker pool, and shuts down checkpoints. Safe to call multiple times.
+// ShutdownContext performs a graceful shutdown: it stops all polling goroutines,
+// then lets workers drain the dispatch channel with a live context so in-flight
+// handler calls can complete their API/database work. Finally it flushes
+// checkpoints. Safe to call multiple times.
 func (p *Poller) ShutdownContext(ctx context.Context) error {
 	p.shutdownOnce.Do(func() {
-		// Step 1: Cancel the parent context so all polling goroutines see ctx.Done().
-		p.cg.Cancel()
+		// Step 1: Signal polling goroutines to stop (without cancelling
+		// the worker context so handlers keep a live context).
+		p.stopPollers()
 
 		// Step 2: Wait for all polling goroutines to return.
 		p.pollerWg.Wait()
@@ -116,10 +127,27 @@ func (p *Poller) ShutdownContext(ctx context.Context) error {
 			return
 		}
 
-		// Step 5: Flush checkpoints.
+		// Step 5: Cancel the parent context (no-op if Close already did it).
+		p.cg.Cancel()
+
+		// Step 6: Flush checkpoints.
 		p.shutdownErr = p.checkpoints.Shutdown(ctx)
 	})
 	return p.shutdownErr
+}
+
+// Close performs a forced shutdown: it cancels the context immediately so
+// in-flight handler calls are aborted, then runs the same drain sequence as
+// ShutdownContext. Use Close when you need to bound shutdown time.
+func (p *Poller) Close() error {
+	p.cg.Cancel()
+	return p.ShutdownContext(context.Background())
+}
+
+// stopPollers signals all polling goroutines to stop without cancelling the
+// worker context.
+func (p *Poller) stopPollers() {
+	p.stopOnce.Do(func() { close(p.stopCh) })
 }
 
 // UpdateTargets starts goroutines for new pairs and stops goroutines for removed
@@ -177,7 +205,7 @@ func (p *Poller) pollPair(ctx context.Context, key CheckpointKey, info Connectio
 	// Phase jitter: sleep a random duration in [0, 10s] before the first poll.
 	//nolint:gosec // Cryptographic randomness not needed for jitter.
 	jitter := time.Duration(rand.Int64N(int64(maxPhasingJitter)))
-	if err := sleepCtx(ctx, jitter); err != nil {
+	if err := p.sleepOrStop(ctx, jitter); err != nil {
 		return
 	}
 
@@ -191,14 +219,45 @@ func (p *Poller) pollPair(ctx context.Context, key CheckpointKey, info Connectio
 
 	for {
 		p.doPoll(ctx, key, info, ghClient)
-		if ctx.Err() != nil {
+		if p.isStopped() || ctx.Err() != nil {
 			return
 		}
 
 		interval := p.getPollInterval(key)
-		if err := sleepCtx(ctx, interval); err != nil {
+		if err := p.sleepOrStop(ctx, interval); err != nil {
 			return
 		}
+	}
+}
+
+// isStopped returns true if stopCh has been closed.
+func (p *Poller) isStopped() bool {
+	select {
+	case <-p.stopCh:
+		return true
+	default:
+		return false
+	}
+}
+
+// sleepOrStop sleeps for the given duration, returning early if the context
+// is cancelled, the per-pair context is cancelled, or stopCh is closed.
+func (p *Poller) sleepOrStop(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		if p.isStopped() {
+			return context.Canceled
+		}
+		return ctx.Err()
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-p.stopCh:
+		return context.Canceled
 	}
 }
 
@@ -227,7 +286,7 @@ func (p *Poller) doPoll(ctx context.Context, key CheckpointKey, info ConnectionI
 	// generic error path so we correctly update pollInterval.
 	if resp != nil && resp.StatusCode == http.StatusNotModified {
 		pollInterval := parsePollInterval(resp)
-		slog.Debug("github events poller: 304 Not Modified",
+		slog.Info("No new events found.",
 			"connection", key.GithubConnectionID, "org", key.OrgName,
 			"pollInterval", pollInterval)
 		cp.PollIntervalSecs = int(pollInterval.Seconds())
@@ -324,13 +383,16 @@ func collectNewEvents(events []*github.Event, lastEventID string) (newEvents []*
 	return
 }
 
-// enqueue sends an event to the dispatch channel, respecting cancellation.
+// enqueue sends an event to the dispatch channel, respecting cancellation
+// and the stop signal.
 func (p *Poller) enqueue(ctx context.Context, evt handlers.Event) error {
 	select {
 	case p.dispatchCh <- evt:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	case <-p.stopCh:
+		return context.Canceled
 	}
 }
 

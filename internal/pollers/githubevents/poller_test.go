@@ -213,10 +213,8 @@ func TestBackpressureBlocksPollerButRespectsCancel(t *testing.T) {
 		t.Fatal("enqueue did not return after context cancel")
 	}
 
-	// Shutdown.
-	shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer shutCancel()
-	_ = p.ShutdownContext(shutCtx)
+	// Use Close (forced shutdown) since the handler blocks on ctx.Done().
+	_ = p.Close()
 }
 
 func TestShutdownDrainsChannelBeforeReturning(t *testing.T) {
