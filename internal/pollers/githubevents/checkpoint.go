@@ -36,15 +36,9 @@ type ConnectionInfo struct {
 	User    string
 }
 
-// Checkpoint holds the durable state for a single polling pair.
+// Checkpoint holds the durable state for a single polling pair. The JSON tags
+// define the on-disk file format.
 type Checkpoint struct {
-	LastEventID      string
-	ETag             string
-	PollIntervalSecs int
-}
-
-// checkpointFileEntry is the JSON-serializable form of a single checkpoint.
-type checkpointFileEntry struct {
 	LastEventID      string `json:"last_event_id"`
 	ETag             string `json:"etag"`
 	PollIntervalSecs int    `json:"poll_interval_seconds"`
@@ -106,7 +100,7 @@ func NewCheckpointStore(path string, clk clock.Clock) (*CheckpointStore, error) 
 
 // parseCheckpointFile parses the JSON checkpoint data into the entries map.
 func parseCheckpointFile(data []byte, entries map[CheckpointKey]Checkpoint) error {
-	var raw map[string]checkpointFileEntry
+	var raw map[string]Checkpoint
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
@@ -115,7 +109,7 @@ func parseCheckpointFile(data []byte, entries map[CheckpointKey]Checkpoint) erro
 		if !ok {
 			continue
 		}
-		entries[key] = Checkpoint(entry)
+		entries[key] = entry
 	}
 	return nil
 }
@@ -235,7 +229,7 @@ func (s *CheckpointStore) retryAfterFailure() {
 // snapshot atomically marks the timer as stopped, checks the dirty flag, and
 // if dirty returns a serializable copy of the entries map with dirty cleared.
 // Returns (nil, false) when no flush is needed.
-func (s *CheckpointStore) snapshot() (map[string]checkpointFileEntry, bool) {
+func (s *CheckpointStore) snapshot() (map[string]Checkpoint, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.stopped = true
@@ -243,9 +237,9 @@ func (s *CheckpointStore) snapshot() (map[string]checkpointFileEntry, bool) {
 		return nil, false
 	}
 	s.dirty = false
-	out := make(map[string]checkpointFileEntry, len(s.entries))
+	out := make(map[string]Checkpoint, len(s.entries))
 	for k, v := range s.entries {
-		out[compositeKey(k)] = checkpointFileEntry(v)
+		out[compositeKey(k)] = v
 	}
 	return out, true
 }

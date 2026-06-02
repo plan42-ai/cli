@@ -44,7 +44,7 @@ func waitForCheckpointFile(t *testing.T, path, compositeKey, lastEventID string)
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	var parsed map[string]checkpointFileEntry
+	var parsed map[string]Checkpoint
 	require.NoError(t, json.Unmarshal(data, &parsed))
 
 	entry, ok := parsed[compositeKey]
@@ -175,7 +175,7 @@ func TestFlushWritesToDisk(t *testing.T) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	var parsed map[string]checkpointFileEntry
+	var parsed map[string]Checkpoint
 	require.NoError(t, json.Unmarshal(data, &parsed))
 
 	entry, ok := parsed[testConn1+":"+testOrg1]
@@ -223,7 +223,7 @@ func TestAtomicWriteProducesCorrectFile(t *testing.T) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	var parsed map[string]checkpointFileEntry
+	var parsed map[string]Checkpoint
 	require.NoError(t, json.Unmarshal(data, &parsed))
 	require.Len(t, parsed, 2)
 
@@ -257,7 +257,7 @@ func TestShutdownFlushWritesPendingChanges(t *testing.T) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	var parsed map[string]checkpointFileEntry
+	var parsed map[string]Checkpoint
 	require.NoError(t, json.Unmarshal(data, &parsed))
 
 	entry, ok := parsed["c1:o1"]
@@ -403,7 +403,7 @@ func TestDeleteRemovesEntryFromDisk(t *testing.T) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	var parsed map[string]checkpointFileEntry
+	var parsed map[string]Checkpoint
 	require.NoError(t, json.Unmarshal(data, &parsed))
 	require.Empty(t, parsed)
 }
