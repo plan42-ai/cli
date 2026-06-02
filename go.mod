@@ -14,6 +14,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-isatty v0.0.22
 	github.com/pelletier/go-toml/v2 v2.3.1
+	github.com/plan42-ai/clock v1.1.4
 	github.com/plan42-ai/concurrency v1.0.4
 	github.com/plan42-ai/ecies v1.0.3
 	github.com/plan42-ai/github-event-handlers v1.0.22
@@ -45,7 +46,6 @@ require (
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/plan42-ai/cache v1.0.1 // indirect
-	github.com/plan42-ai/clock v1.1.4 // indirect
 	github.com/plan42-ai/sigv4util v1.0.4 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect

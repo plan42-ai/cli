@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"math"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/google/renameio/v2"
+	"github.com/plan42-ai/clock"
 	"github.com/plan42-ai/concurrency"
 )
 
@@ -58,7 +58,8 @@ type CheckpointStore struct {
 	mu      sync.Mutex
 	entries map[CheckpointKey]Checkpoint
 	dirty   bool
-	timer   *time.Timer
+	clock   clock.Clock
+	timer   clock.Timer
 	stopped bool
 	path    string
 	cg      *concurrency.ContextGroup
@@ -83,8 +84,15 @@ func NewCheckpointStore() (*CheckpointStore, error) {
 }
 
 // newCheckpointStoreFromPath is the internal constructor that accepts an
-// explicit file path. It creates its own ContextGroup for the watchTimer.
+// explicit file path and uses a real clock.
 func newCheckpointStoreFromPath(path string) (*CheckpointStore, error) {
+	return newCheckpointStoreFromPathWithClock(path, clock.NewRealClock())
+}
+
+// newCheckpointStoreFromPathWithClock is the internal constructor that accepts
+// an explicit file path and clock. It creates its own ContextGroup for the
+// watchTimer. Tests inject a fake clock to drive the debounce timer.
+func newCheckpointStoreFromPathWithClock(path string, clk clock.Clock) (*CheckpointStore, error) {
 	entries := make(map[CheckpointKey]Checkpoint)
 	data, err := os.ReadFile(path)
 	if err == nil {
@@ -95,13 +103,14 @@ func newCheckpointStoreFromPath(path string) (*CheckpointStore, error) {
 		slog.Error("failed to read checkpoint file; starting with empty state", "path", path, "error", err)
 	}
 
-	// Create a stopped timer: fire far in the future, then immediately stop.
-	timer := time.NewTimer(time.Duration(math.MaxInt64))
+	// Create a stopped timer; markDirty resets it on the first mutation.
+	timer := clk.NewTimer(flushDebounce)
 	timer.Stop()
 
 	cg := concurrency.NewContextGroup()
 	s := &CheckpointStore{
 		entries: entries,
+		clock:   clk,
 		timer:   timer,
 		stopped: true,
 		path:    path,
@@ -190,7 +199,7 @@ func (s *CheckpointStore) watchTimer() {
 		select {
 		case <-ctx.Done():
 			return
-		case <-s.timer.C:
+		case <-s.timer.C():
 			s.cg.Add(1)
 			go func() {
 				defer s.cg.Done()
