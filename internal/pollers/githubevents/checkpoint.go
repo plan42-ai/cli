@@ -174,7 +174,10 @@ func (s *CheckpointStore) markDirty() {
 	s.timer.Reset(flushDebounce)
 }
 
-// watchTimer waits for the debounce timer to fire and schedules a flush.
+// watchTimer waits for the debounce timer to fire and flushes. The flush runs
+// inline on this single goroutine (not in a spawned one) so flushes are
+// serialized: a later flush can never start while an earlier one is still
+// writing, which would let the older write stomp the newer state on disk.
 func (s *CheckpointStore) watchTimer(timer clock.Timer) {
 	defer s.cg.Done()
 	ctx := s.cg.Context()
@@ -183,11 +186,7 @@ func (s *CheckpointStore) watchTimer(timer clock.Timer) {
 		case <-ctx.Done():
 			return
 		case <-timer.C():
-			s.cg.Add(1)
-			go func() {
-				defer s.cg.Done()
-				s.flushWithRetry()
-			}()
+			s.flushWithRetry()
 		}
 	}
 }
