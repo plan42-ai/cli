@@ -305,18 +305,17 @@ func (p *Poller) dispatch(ctx context.Context, collected []*github.Event, handle
 	return true
 }
 
-// collectNewEvents walks a page of events and returns those that are newer than
-// lastEventID. The returned slice is in the same (newest-first) order as the
-// input. hitCheckpoint is true if lastEventID was found.
+// collectNewEvents returns the prefix of events (newest-first) that is newer
+// than lastEventID — everything up to but not including the event matching it.
+// The result is a sub-slice of events, not a copy. hitCheckpoint is true if
+// lastEventID was found on the page.
 func collectNewEvents(events []*github.Event, lastEventID string) (newEvents []*github.Event, hitCheckpoint bool) {
-	for _, evt := range events {
-		if evt.GetID() == lastEventID && lastEventID != "" {
-			hitCheckpoint = true
-			return
+	for i, evt := range events {
+		if lastEventID != "" && evt.GetID() == lastEventID {
+			return events[:i], true
 		}
-		newEvents = append(newEvents, evt)
 	}
-	return
+	return events, false
 }
 
 // enqueue sends an item to the event channel, respecting cancellation.
