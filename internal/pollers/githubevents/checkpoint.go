@@ -65,34 +65,25 @@ type CheckpointStore struct {
 	cg      *concurrency.ContextGroup
 }
 
-// NewCheckpointStore creates a CheckpointStore, loading any existing checkpoint
-// file from ~/.config/plan42-runner.checkpoint.json. A missing file is treated
-// as empty. An unparseable file is logged and treated as empty.
-func NewCheckpointStore() (*CheckpointStore, error) {
+// DefaultCheckpointPath returns the default checkpoint file path,
+// ~/.config/plan42-runner.checkpoint.json.
+func DefaultCheckpointPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, configDirName, checkpointFileName), nil
+}
+
+// NewCheckpointStore creates a CheckpointStore backed by the file at path, using
+// clk for its debounce timer. The parent directory is created if needed. Any
+// existing file is loaded; a missing or unparseable file is treated as empty.
+// It starts a ContextGroup-tracked goroutine that watches the debounce timer.
+func NewCheckpointStore(path string, clk clock.Clock) (*CheckpointStore, error) {
+	if err := os.MkdirAll(filepath.Dir(path), configDirPerm); err != nil {
 		return nil, err
 	}
 
-	configDir := filepath.Join(home, configDirName)
-	if err := os.MkdirAll(configDir, configDirPerm); err != nil {
-		return nil, err
-	}
-
-	path := filepath.Join(configDir, checkpointFileName)
-	return newCheckpointStoreFromPath(path)
-}
-
-// newCheckpointStoreFromPath is the internal constructor that accepts an
-// explicit file path and uses a real clock.
-func newCheckpointStoreFromPath(path string) (*CheckpointStore, error) {
-	return newCheckpointStoreFromPathWithClock(path, clock.NewRealClock())
-}
-
-// newCheckpointStoreFromPathWithClock is the internal constructor that accepts
-// an explicit file path and clock. It creates its own ContextGroup for the
-// watchTimer. Tests inject a fake clock to drive the debounce timer.
-func newCheckpointStoreFromPathWithClock(path string, clk clock.Clock) (*CheckpointStore, error) {
 	entries := make(map[CheckpointKey]Checkpoint)
 	data, err := os.ReadFile(path)
 	if err == nil {

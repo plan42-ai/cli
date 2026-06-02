@@ -23,7 +23,7 @@ func newTestStoreWithClock(t *testing.T, clk clock.Clock) (*CheckpointStore, str
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, checkpointFileName)
-	store, err := newCheckpointStoreFromPathWithClock(path, clk)
+	store, err := NewCheckpointStore(path, clk)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = store.ShutdownTimeout(5 * time.Second)
@@ -57,7 +57,7 @@ func newTestStore(t *testing.T) (*CheckpointStore, string) {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, checkpointFileName)
-	store, err := newCheckpointStoreFromPath(path)
+	store, err := NewCheckpointStore(path, clock.NewRealClock())
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = store.ShutdownTimeout(5 * time.Second)
@@ -73,7 +73,7 @@ func newTestStoreWithFile(t *testing.T, data []byte) *CheckpointStore {
 	path := filepath.Join(dir, checkpointFileName)
 	require.NoError(t, os.WriteFile(path, data, 0600))
 
-	store, err := newCheckpointStoreFromPath(path)
+	store, err := NewCheckpointStore(path, clock.NewRealClock())
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = store.ShutdownTimeout(5 * time.Second)
@@ -241,7 +241,7 @@ func TestShutdownFlushWritesPendingChanges(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, checkpointFileName)
 
-	store, err := newCheckpointStoreFromPath(path)
+	store, err := NewCheckpointStore(path, clock.NewRealClock())
 	require.NoError(t, err)
 
 	key := CheckpointKey{GithubConnectionID: "c1", OrgName: "o1"}
@@ -280,29 +280,30 @@ func TestFilePermissions(t *testing.T) {
 
 func TestDirectoryCreation(t *testing.T) {
 	dir := t.TempDir()
-	configDir := filepath.Join(dir, "home", configDirName)
+	configDir := filepath.Join(dir, "sub", configDirName)
 	path := filepath.Join(configDir, checkpointFileName)
 
-	// The config dir doesn't exist yet. newCheckpointStoreFromPath doesn't
-	// create it (that's NewCheckpointStore's job), but we can verify the
-	// NewCheckpointStore path by setting HOME.
-	t.Setenv("HOME", filepath.Join(dir, "home"))
-
-	store, err := NewCheckpointStore()
+	// The parent directory doesn't exist yet; the constructor must create it.
+	store, err := NewCheckpointStore(path, clock.NewRealClock())
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = store.ShutdownTimeout(5 * time.Second)
 	})
 
-	// Verify the config directory was created with correct permissions.
 	info, err := os.Stat(configDir)
 	require.NoError(t, err)
 	require.True(t, info.IsDir())
 	require.Equal(t, os.FileMode(0700), info.Mode().Perm(),
 		"config directory should have 0700 permissions")
+}
 
-	// Verify the path matches expectation.
-	require.Equal(t, path, store.path)
+func TestDefaultCheckpointPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	path, err := DefaultCheckpointPath()
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(home, configDirName, checkpointFileName), path)
 }
 
 func TestConcurrentAccess(t *testing.T) {
@@ -363,7 +364,7 @@ func TestRoundTripThroughFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, checkpointFileName)
 
-	store1, err := newCheckpointStoreFromPath(path)
+	store1, err := NewCheckpointStore(path, clock.NewRealClock())
 	require.NoError(t, err)
 
 	key := CheckpointKey{GithubConnectionID: "c1", OrgName: "o1"}
@@ -375,7 +376,7 @@ func TestRoundTripThroughFile(t *testing.T) {
 	require.NoError(t, store1.flush())
 	_ = store1.ShutdownTimeout(2 * time.Second)
 
-	store2, err := newCheckpointStoreFromPath(path)
+	store2, err := NewCheckpointStore(path, clock.NewRealClock())
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = store2.ShutdownTimeout(5 * time.Second)
