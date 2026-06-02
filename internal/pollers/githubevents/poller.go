@@ -113,18 +113,11 @@ func (p *Poller) UpdateTargets(desired map[CheckpointKey]ConnectionInfo) {
 	p.startNewTargets(desired)
 }
 
-// removedTarget carries what waitForRemovedTargets needs to finish stopping a
-// cancelled target.
-type removedTarget struct {
-	key  CheckpointKey
-	done chan struct{}
-}
-
 // cancelRemovedTargets cancels and unregisters every running target not in
 // desired, returning them so the caller can wait for their goroutines to exit.
 // Must be called with p.mu held.
-func (p *Poller) cancelRemovedTargets(desired map[CheckpointKey]ConnectionInfo) []removedTarget {
-	var removed []removedTarget
+func (p *Poller) cancelRemovedTargets(desired map[CheckpointKey]ConnectionInfo) map[CheckpointKey]*target {
+	removed := make(map[CheckpointKey]*target)
 	for key, tgt := range p.targets {
 		if _, ok := desired[key]; ok {
 			continue
@@ -133,17 +126,17 @@ func (p *Poller) cancelRemovedTargets(desired map[CheckpointKey]ConnectionInfo) 
 			"connection", key.GithubConnectionID, "org", key.OrgName)
 		tgt.cancel()
 		delete(p.targets, key)
-		removed = append(removed, removedTarget{key: key, done: tgt.done})
+		removed[key] = tgt
 	}
 	return removed
 }
 
 // waitForRemovedTargets waits for each cancelled target's goroutine to exit,
 // then deletes its checkpoint. Must be called with p.mu held.
-func (p *Poller) waitForRemovedTargets(removed []removedTarget) {
-	for _, r := range removed {
-		<-r.done
-		p.checkpoints.Delete(r.key)
+func (p *Poller) waitForRemovedTargets(removed map[CheckpointKey]*target) {
+	for key, tgt := range removed {
+		<-tgt.done
+		p.checkpoints.Delete(key)
 	}
 }
 
