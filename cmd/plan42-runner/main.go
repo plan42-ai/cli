@@ -77,7 +77,6 @@ func main() {
 		EventPoller: poller,
 	})
 
-	// --- Message poller (unchanged behavior) ---
 	msgPoller := messages.New(options.Client, tokenID, runnerID, options.PollerOptions()...)
 	defer util.Close(msgPoller)
 
