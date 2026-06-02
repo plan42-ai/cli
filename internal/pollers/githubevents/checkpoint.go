@@ -78,7 +78,8 @@ func DefaultCheckpointPath() (string, error) {
 // NewCheckpointStore creates a CheckpointStore backed by the file at path, using
 // clk for its debounce timer. The parent directory is created if needed. Any
 // existing file is loaded; a missing or unparseable file is treated as empty.
-// It starts a ContextGroup-tracked goroutine that watches the debounce timer.
+// The debounce timer (and the goroutine that watches it) is created lazily on
+// the first mutation.
 func NewCheckpointStore(path string, clk clock.Clock) (*CheckpointStore, error) {
 	if err := os.MkdirAll(filepath.Dir(path), configDirPerm); err != nil {
 		return nil, err
@@ -94,24 +95,13 @@ func NewCheckpointStore(path string, clk clock.Clock) (*CheckpointStore, error) 
 		slog.Error("failed to read checkpoint file; starting with empty state", "path", path, "error", err)
 	}
 
-	// Create a stopped timer; markDirty resets it on the first mutation.
-	timer := clk.NewTimer(flushDebounce)
-	timer.Stop()
-
-	cg := concurrency.NewContextGroup()
-	s := &CheckpointStore{
+	return &CheckpointStore{
 		entries: entries,
 		clock:   clk,
-		timer:   timer,
 		stopped: true,
 		path:    path,
-		cg:      cg,
-	}
-
-	cg.Add(1)
-	go s.watchTimer()
-
-	return s, nil
+		cg:      concurrency.NewContextGroup(),
+	}, nil
 }
 
 // parseCheckpointFile parses the JSON checkpoint data into the entries map.
@@ -172,25 +162,33 @@ func (s *CheckpointStore) Delete(key CheckpointKey) {
 	s.markDirty()
 }
 
-// markDirty sets the dirty flag and schedules the timer if it is stopped.
-// Must be called with s.mu held.
+// markDirty sets the dirty flag and schedules a debounced flush if one isn't
+// already pending. The timer (and its watcher goroutine) is created on the first
+// scheduling and reused thereafter. Must be called with s.mu held.
 func (s *CheckpointStore) markDirty() {
 	s.dirty = true
-	if s.stopped {
-		s.timer.Reset(flushDebounce)
-		s.stopped = false
+	if !s.stopped {
+		return // a flush is already scheduled; coalesce into it
 	}
+	s.stopped = false
+	if s.timer == nil {
+		s.timer = s.clock.NewTimer(flushDebounce)
+		s.cg.Add(1)
+		go s.watchTimer(s.timer)
+		return
+	}
+	s.timer.Reset(flushDebounce)
 }
 
 // watchTimer waits for the debounce timer to fire and schedules a flush.
-func (s *CheckpointStore) watchTimer() {
+func (s *CheckpointStore) watchTimer(timer clock.Timer) {
 	defer s.cg.Done()
 	ctx := s.cg.Context()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-s.timer.C():
+		case <-timer.C():
 			s.cg.Add(1)
 			go func() {
 				defer s.cg.Done()
@@ -270,10 +268,13 @@ func (s *CheckpointStore) ShutdownTimeout(timeout time.Duration) error {
 	return s.Shutdown(ctx)
 }
 
-// stopTimer stops the debounce timer under the mutex.
+// stopTimer stops the debounce timer under the mutex. The timer is nil if the
+// store was never mutated.
 func (s *CheckpointStore) stopTimer() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.timer.Stop()
+	if s.timer != nil {
+		s.timer.Stop()
+	}
 	s.stopped = true
 }
