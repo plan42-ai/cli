@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/go-github/v81/github"
 	"github.com/plan42-ai/concurrency"
+	ghapi "github.com/plan42-ai/github-event-handlers/github"
 	"github.com/plan42-ai/github-event-handlers/handlers"
 )
 
@@ -47,7 +48,7 @@ type target struct {
 type Poller struct {
 	checkpoints  *CheckpointStore
 	cg           *concurrency.ContextGroup
-	eventCh      chan handlers.Event
+	eventCh      chan DispatchItem
 	shutdownOnce sync.Once
 	shutdownErr  error
 	mu           sync.Mutex
@@ -62,14 +63,14 @@ func NewPoller(cfg Config) *Poller {
 	return &Poller{
 		checkpoints: cfg.Checkpoints,
 		cg:          concurrency.NewContextGroup(),
-		eventCh:     make(chan handlers.Event, capacity),
+		eventCh:     make(chan DispatchItem, capacity),
 		targets:     make(map[CheckpointKey]*target),
 	}
 }
 
 // EventCh returns the channel that polling goroutines send events to. A
 // Dispatcher consumes it. The channel is closed when the Poller shuts down.
-func (p *Poller) EventCh() <-chan handlers.Event { return p.eventCh }
+func (p *Poller) EventCh() <-chan DispatchItem { return p.eventCh }
 
 // Close stops all polling goroutines, closes the event channel so the consumer
 // can finish draining it, and shuts down the checkpoint store (a final flush).
@@ -141,16 +142,23 @@ func (p *Poller) pollTarget(ctx context.Context, key CheckpointKey, info Connect
 		return
 	}
 
-	// Build a go-github client for making Events API requests.
+	// Build a go-github client for polling the Events API, and the github client
+	// handlers use to act on the events (both authenticated for this connection).
 	ghClient, err := newEventsClient(info)
 	if err != nil {
 		slog.Error("github events poller: failed to create github client",
 			"connection", key.GithubConnectionID, "org", key.OrgName, "error", err)
 		return
 	}
+	handlerClient, err := newHandlerClient(info)
+	if err != nil {
+		slog.Error("github events poller: failed to create handler client",
+			"connection", key.GithubConnectionID, "org", key.OrgName, "error", err)
+		return
+	}
 
 	for {
-		p.doPoll(ctx, key, info, ghClient)
+		p.doPoll(ctx, key, info, ghClient, handlerClient)
 		if ctx.Err() != nil {
 			return
 		}
@@ -162,8 +170,9 @@ func (p *Poller) pollTarget(ctx context.Context, key CheckpointKey, info Connect
 	}
 }
 
-// doPoll performs one iteration of the polling loop for a pair.
-func (p *Poller) doPoll(ctx context.Context, key CheckpointKey, info ConnectionInfo, ghClient *github.Client) {
+// doPoll performs one iteration of the polling loop for a pair. handlerClient is
+// the github client dispatched events carry for handlers to act on.
+func (p *Poller) doPoll(ctx context.Context, key CheckpointKey, info ConnectionInfo, ghClient *github.Client, handlerClient *ghapi.Client) {
 	cp, hasCheckpoint := p.checkpoints.Get(key)
 
 	// Fetch the first page, sending If-None-Match so an unchanged feed returns 304.
@@ -231,7 +240,7 @@ func (p *Poller) doPoll(ctx context.Context, key CheckpointKey, info ConnectionI
 
 	// If the context is cancelled mid-dispatch, leave the checkpoint so the
 	// undelivered events are refetched on the next poll.
-	if !p.dispatch(ctx, collected) {
+	if !p.dispatch(ctx, collected, handlerClient) {
 		return
 	}
 	p.checkpoints.Set(key, newCp)
@@ -252,10 +261,11 @@ func newestEventID(events []*github.Event, fallback string) string {
 }
 
 // dispatch parses collected events and enqueues them oldest-first, so handlers
-// see them in chronological order. It returns false if the context was cancelled
-// before every event was enqueued, signalling the caller not to advance the
-// checkpoint.
-func (p *Poller) dispatch(ctx context.Context, collected []*github.Event) bool {
+// see them in chronological order. Each event is paired with handlerClient, the
+// github client for its connection. It returns false if the context was
+// cancelled before every event was enqueued, signalling the caller not to
+// advance the checkpoint.
+func (p *Poller) dispatch(ctx context.Context, collected []*github.Event, handlerClient *ghapi.Client) bool {
 	for i := len(collected) - 1; i >= 0; i-- {
 		evt, err := handlers.ParseEventsAPI(collected[i])
 		if err != nil {
@@ -266,7 +276,7 @@ func (p *Poller) dispatch(ctx context.Context, collected []*github.Event) bool {
 		if evt == nil {
 			continue
 		}
-		if err := p.enqueue(ctx, evt); err != nil {
+		if err := p.enqueue(ctx, DispatchItem{event: evt, client: handlerClient}); err != nil {
 			return false
 		}
 	}
@@ -287,10 +297,10 @@ func collectNewEvents(events []*github.Event, lastEventID string) (newEvents []*
 	return
 }
 
-// enqueue sends an event to the event channel, respecting cancellation.
-func (p *Poller) enqueue(ctx context.Context, evt handlers.Event) error {
+// enqueue sends an item to the event channel, respecting cancellation.
+func (p *Poller) enqueue(ctx context.Context, item DispatchItem) error {
 	select {
-	case p.eventCh <- evt:
+	case p.eventCh <- item:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -372,6 +382,19 @@ func newEventsClient(info ConnectionInfo) (*github.Client, error) {
 		}
 	}
 	return gh, nil
+}
+
+// newHandlerClient builds the github client that dispatched events carry for
+// handlers to act on, authenticated with the connection's token. The token is
+// applied by tokenTransport, so no per-call auth context is needed.
+func newHandlerClient(info ConnectionInfo) (*ghapi.Client, error) {
+	httpClient := &http.Client{
+		Transport: &tokenTransport{
+			token:   info.Token,
+			wrapped: http.DefaultTransport,
+		},
+	}
+	return ghapi.NewClient(httpClient, info.BaseURL)
 }
 
 type tokenTransport struct {

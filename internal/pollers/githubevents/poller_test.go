@@ -130,14 +130,14 @@ func TestEnqueueBlocksWhenFullButRespectsCancel(t *testing.T) {
 	p := newTestPoller(t, store)
 
 	// Fill the buffer (capacity 1) so the next enqueue must block.
-	p.eventCh <- &testEvent{evtType: testEventType, delivery: "d1"}
+	p.eventCh <- DispatchItem{event: &testEvent{evtType: testEventType, delivery: "d1"}}
 
 	// Now the channel is full. enqueue should block but respect cancellation.
 	ctx, cancel := context.WithCancel(context.Background())
 
 	done := make(chan error, 1)
 	go func() {
-		done <- p.enqueue(ctx, &testEvent{evtType: testEventType, delivery: "d2"})
+		done <- p.enqueue(ctx, DispatchItem{event: &testEvent{evtType: testEventType, delivery: "d2"}})
 	}()
 
 	// The enqueue should be blocked.
@@ -388,9 +388,11 @@ func TestFirstPollEstablishesBaselineWithoutProcessing(t *testing.T) {
 	info := ConnectionInfo{Token: "t", User: "u", BaseURL: ts.URL}
 	ghClient, err := newEventsClient(info)
 	require.NoError(t, err)
+	handlerClient, err := newHandlerClient(info)
+	require.NoError(t, err)
 	key := CheckpointKey{GithubConnectionID: "c1", OrgName: testOrg1}
 
-	p.doPoll(context.Background(), key, info, ghClient)
+	p.doPoll(context.Background(), key, info, ghClient, handlerClient)
 
 	require.Empty(t, p.eventCh, "first poll must not dispatch pre-existing events")
 
@@ -413,12 +415,14 @@ func TestSubsequentPollProcessesOnlyNewEvents(t *testing.T) {
 	info := ConnectionInfo{Token: "t", User: "u", BaseURL: ts.URL}
 	ghClient, err := newEventsClient(info)
 	require.NoError(t, err)
+	handlerClient, err := newHandlerClient(info)
+	require.NoError(t, err)
 	key := CheckpointKey{GithubConnectionID: "c1", OrgName: testOrg1}
 
 	// A baseline already exists at event "2"; only event "3" is new.
 	store.Set(key, Checkpoint{LastEventID: "2"})
 
-	p.doPoll(context.Background(), key, info, ghClient)
+	p.doPoll(context.Background(), key, info, ghClient, handlerClient)
 
 	require.Len(t, p.eventCh, 1, "only the event newer than the checkpoint should be dispatched")
 

@@ -6,10 +6,18 @@ import (
 	"time"
 
 	"github.com/plan42-ai/concurrency"
+	ghapi "github.com/plan42-ai/github-event-handlers/github"
 	"github.com/plan42-ai/github-event-handlers/handlers"
 )
 
 const defaultWorkerCount = 100
+
+// DispatchItem pairs an event with the github client a handler should use to act
+// on it. The client is authenticated for the event's connection.
+type DispatchItem struct {
+	event  handlers.Event
+	client *ghapi.Client
+}
 
 // Dispatcher reads events from a channel and invokes HandlerRegistry.Handle
 // via a fixed-size worker pool. It owns a single ContextGroup that tracks the
@@ -17,10 +25,10 @@ const defaultWorkerCount = 100
 type Dispatcher struct {
 	registry *handlers.HandlerRegistry
 	cg       *concurrency.ContextGroup
-	eventCh  <-chan handlers.Event
+	eventCh  <-chan DispatchItem
 }
 
-func NewDispatcher(registry *handlers.HandlerRegistry, eventCh <-chan handlers.Event, workerCount int) *Dispatcher {
+func NewDispatcher(registry *handlers.HandlerRegistry, eventCh <-chan DispatchItem, workerCount int) *Dispatcher {
 	if workerCount <= 0 {
 		workerCount = defaultWorkerCount
 	}
@@ -73,15 +81,15 @@ func (d *Dispatcher) worker() {
 		case <-ctx.Done():
 			// Forced termination (Close): stop even if eventCh is still open.
 			return
-		case evt, ok := <-d.eventCh:
+		case item, ok := <-d.eventCh:
 			if !ok {
 				// Graceful drain complete: the producer closed the channel.
 				return
 			}
-			if err := d.registry.Handle(ctx, evt, nil); err != nil {
+			if err := d.registry.Handle(ctx, item.event, item.client); err != nil {
 				slog.ErrorContext(ctx, "github events poller: handler error",
-					"deliveryID", evt.GetDeliveryID(),
-					"eventType", evt.EventType(),
+					"deliveryID", item.event.GetDeliveryID(),
+					"eventType", item.event.EventType(),
 					"error", err,
 				)
 			}

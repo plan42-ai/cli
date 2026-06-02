@@ -20,11 +20,11 @@ func TestDispatcherHandlesAllEvents(t *testing.T) {
 		handleCount.Add(1)
 	})
 
-	eventCh := make(chan handlers.Event, 10)
+	eventCh := make(chan DispatchItem, 10)
 	d := NewDispatcher(registry, eventCh, 3)
 
 	for range 5 {
-		eventCh <- &testEvent{evtType: testEventType, delivery: "d1"}
+		eventCh <- DispatchItem{event: &testEvent{evtType: testEventType, delivery: "d1"}}
 	}
 	close(eventCh)
 
@@ -47,11 +47,11 @@ func TestDispatcherDrainsBeforeShutdownReturns(t *testing.T) {
 		events = append(events, evt.GetDeliveryID())
 	})
 
-	eventCh := make(chan handlers.Event, 10)
+	eventCh := make(chan DispatchItem, 10)
 	d := NewDispatcher(registry, eventCh, 2)
 
 	for i := range 5 {
-		eventCh <- &testEvent{evtType: testEventType, delivery: string(rune('A' + i))}
+		eventCh <- DispatchItem{event: &testEvent{evtType: testEventType, delivery: string(rune('A' + i))}}
 	}
 	close(eventCh)
 
@@ -70,12 +70,12 @@ func TestDispatcherCloseForcesTermination(t *testing.T) {
 		<-ctx.Done() // block until the worker context is cancelled
 	})
 
-	eventCh := make(chan handlers.Event, 10)
+	eventCh := make(chan DispatchItem, 10)
 	d := NewDispatcher(registry, eventCh, 1)
 
 	// Note: eventCh is left open, the abort/shutdown condition where workers
 	// must observe cancellation rather than waiting for the channel to close.
-	eventCh <- &testEvent{evtType: testEventType, delivery: "d1"}
+	eventCh <- DispatchItem{event: &testEvent{evtType: testEventType, delivery: "d1"}}
 
 	// The handler blocks on ctx.Done(), so a graceful drain can't complete and
 	// ShutdownContext times out without cancelling.
