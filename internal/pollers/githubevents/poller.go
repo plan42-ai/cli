@@ -96,53 +96,35 @@ func (p *Poller) Close() error {
 // UpdateTargets starts goroutines for new targets and stops goroutines for
 // removed targets. It satisfies the environments.EventPoller interface.
 //
-// Removal happens in two passes: cancel every removed target first, then wait
-// for each to exit and delete its checkpoint. Cancelling all before waiting
-// means one slow target can't keep the others polling. The work is synchronous
-// under p.mu, which is what makes the checkpoint delete safe: a cancelled
+// New targets start polling in the same pass that cancels the removed ones, so
+// they don't have to wait for the old goroutines to exit. The second pass then
+// waits for each removed target to exit and deletes its checkpoint. Both passes
+// run under p.mu, which is what makes the checkpoint delete safe: a cancelled
 // target can no longer write its checkpoint once done is closed, and no
-// concurrent UpdateTargets can re-add the target between the wait and the
-// delete. The lock order is always Poller -> Checkpoints (a polling goroutine
-// never takes p.mu), so waiting under the lock can't deadlock.
+// concurrent UpdateTargets can re-add it between the wait and the delete. The
+// lock order is always Poller -> Checkpoints (a polling goroutine never takes
+// p.mu), so waiting under the lock can't deadlock.
 func (p *Poller) UpdateTargets(desired map[CheckpointKey]ConnectionInfo) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	removed := p.cancelRemovedTargets(desired)
-	p.waitForRemovedTargets(removed)
-	p.startNewTargets(desired)
+	p.cancelRemovedTargetsAndStartNewOnes(desired)
+	p.waitForRemovedTargets(desired)
 }
 
-// cancelRemovedTargets cancels and unregisters every running target not in
-// desired, returning them so the caller can wait for their goroutines to exit.
-// Must be called with p.mu held.
-func (p *Poller) cancelRemovedTargets(desired map[CheckpointKey]ConnectionInfo) map[CheckpointKey]*target {
-	removed := make(map[CheckpointKey]*target)
+// cancelRemovedTargetsAndStartNewOnes cancels every running target not in
+// desired (leaving it registered for waitForRemovedTargets to reap) and starts
+// a goroutine for every desired target not already running. Must be called with
+// p.mu held.
+func (p *Poller) cancelRemovedTargetsAndStartNewOnes(desired map[CheckpointKey]ConnectionInfo) {
 	for key, tgt := range p.targets {
-		if _, ok := desired[key]; ok {
-			continue
+		if _, ok := desired[key]; !ok {
+			slog.Info("github events poller: stopping target",
+				"connection", key.GithubConnectionID, "org", key.OrgName)
+			tgt.cancel()
 		}
-		slog.Info("github events poller: stopping target",
-			"connection", key.GithubConnectionID, "org", key.OrgName)
-		tgt.cancel()
-		delete(p.targets, key)
-		removed[key] = tgt
 	}
-	return removed
-}
 
-// waitForRemovedTargets waits for each cancelled target's goroutine to exit,
-// then deletes its checkpoint. Must be called with p.mu held.
-func (p *Poller) waitForRemovedTargets(removed map[CheckpointKey]*target) {
-	for key, tgt := range removed {
-		<-tgt.done
-		p.checkpoints.Delete(key)
-	}
-}
-
-// startNewTargets starts a polling goroutine for each desired target not already
-// running. Must be called with p.mu held.
-func (p *Poller) startNewTargets(desired map[CheckpointKey]ConnectionInfo) {
 	for key, info := range desired {
 		if _, ok := p.targets[key]; ok {
 			continue
@@ -154,6 +136,20 @@ func (p *Poller) startNewTargets(desired map[CheckpointKey]ConnectionInfo) {
 		go p.pollTarget(ctx, key, info, done)
 		slog.Info("github events poller: starting target",
 			"connection", key.GithubConnectionID, "org", key.OrgName)
+	}
+}
+
+// waitForRemovedTargets waits for every cancelled target (those no longer in
+// desired) to exit, then deletes its checkpoint and unregisters it. Must be
+// called with p.mu held.
+func (p *Poller) waitForRemovedTargets(desired map[CheckpointKey]ConnectionInfo) {
+	for key, tgt := range p.targets {
+		if _, ok := desired[key]; ok {
+			continue
+		}
+		<-tgt.done
+		p.checkpoints.Delete(key)
+		delete(p.targets, key)
 	}
 }
 
