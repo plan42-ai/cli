@@ -37,18 +37,19 @@ func newTestStoreWithClock(t *testing.T, clk clock.Clock) (*CheckpointStore, str
 // for the debounce itself — a fake clock advances that instantly).
 func waitForCheckpointFile(t *testing.T, path, compositeKey, lastEventID string) {
 	t.Helper()
-	require.Eventually(t, func() bool {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return false
-		}
-		var parsed map[string]checkpointFileEntry
-		if json.Unmarshal(data, &parsed) != nil {
-			return false
-		}
-		entry, ok := parsed[compositeKey]
-		return ok && entry.LastEventID == lastEventID
-	}, 2*time.Second, 5*time.Millisecond, "checkpoint file should record the event")
+	// The flush runs in a goroutine after the (fake-clock) timer fires; give it a
+	// brief moment to land, then verify the file directly.
+	time.Sleep(100 * time.Millisecond)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	var parsed map[string]checkpointFileEntry
+	require.NoError(t, json.Unmarshal(data, &parsed))
+
+	entry, ok := parsed[compositeKey]
+	require.True(t, ok, "checkpoint file should record the key")
+	require.Equal(t, lastEventID, entry.LastEventID)
 }
 
 // newTestStore creates a CheckpointStore backed by a temp directory.
