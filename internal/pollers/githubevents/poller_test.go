@@ -320,7 +320,7 @@ func newTestPoller(t *testing.T, store *CheckpointStore) *Poller {
 	return p
 }
 
-func TestCollectNewEventsStopsAtCheckpoint(t *testing.T) {
+func TestSelectNewEventsStopsAtCheckpoint(t *testing.T) {
 	events := []*github.Event{
 		{ID: github.Ptr("5")},
 		{ID: github.Ptr("4")},
@@ -329,34 +329,34 @@ func TestCollectNewEventsStopsAtCheckpoint(t *testing.T) {
 		{ID: github.Ptr("1")},
 	}
 
-	collected, hit := collectNewEvents(events, "3")
+	selected, hit := selectNewEvents(events, "3")
 	require.True(t, hit, "should hit checkpoint")
-	require.Len(t, collected, 2)
-	require.Equal(t, "5", collected[0].GetID())
-	require.Equal(t, "4", collected[1].GetID())
+	require.Len(t, selected, 2)
+	require.Equal(t, "5", selected[0].GetID())
+	require.Equal(t, "4", selected[1].GetID())
 }
 
-func TestCollectNewEventsNoCheckpoint(t *testing.T) {
+func TestSelectNewEventsNoCheckpoint(t *testing.T) {
 	events := []*github.Event{
 		{ID: github.Ptr("3")},
 		{ID: github.Ptr("2")},
 		{ID: github.Ptr("1")},
 	}
 
-	collected, hit := collectNewEvents(events, "")
+	selected, hit := selectNewEvents(events, "")
 	require.False(t, hit)
-	require.Len(t, collected, 3)
+	require.Len(t, selected, 3)
 }
 
-func TestCollectNewEventsCheckpointNotFound(t *testing.T) {
+func TestSelectNewEventsCheckpointNotFound(t *testing.T) {
 	events := []*github.Event{
 		{ID: github.Ptr("5")},
 		{ID: github.Ptr("4")},
 	}
 
-	collected, hit := collectNewEvents(events, "99")
+	selected, hit := selectNewEvents(events, "99")
 	require.False(t, hit, "checkpoint not in page")
-	require.Len(t, collected, 2)
+	require.Len(t, selected, 2)
 }
 
 // eventsServer returns an httptest server that serves the given JSON body for

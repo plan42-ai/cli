@@ -242,8 +242,8 @@ func (p *Poller) doPoll(ctx context.Context, key CheckpointKey, info ConnectionI
 	// Collect new events (newest-first) across as many pages as needed, stopping
 	// at the previous checkpoint, the last page (a short page means no more), or
 	// the per-poll cap. The loop condition tests the most recently fetched page.
-	collected, hitCheckpoint := collectNewEvents(events, cp.LastEventID)
-	for page := 2; !hitCheckpoint && len(events) == eventsPageSize && len(collected) < maxEventsPerPoll; page++ {
+	selected, hitCheckpoint := selectNewEvents(events, cp.LastEventID)
+	for page := 2; !hitCheckpoint && len(events) == eventsPageSize && len(selected) < maxEventsPerPoll; page++ {
 		events, _, err = fetchEventsPage(ctx, ghClient, info.User, key.OrgName, page, "")
 		if err != nil {
 			if ctx.Err() != nil {
@@ -256,20 +256,20 @@ func (p *Poller) doPoll(ctx context.Context, key CheckpointKey, info ConnectionI
 			return
 		}
 		var pageNew []*github.Event
-		pageNew, hitCheckpoint = collectNewEvents(events, cp.LastEventID)
-		collected = append(collected, pageNew...)
+		pageNew, hitCheckpoint = selectNewEvents(events, cp.LastEventID)
+		selected = append(selected, pageNew...)
 	}
 
 	// If the context is cancelled mid-dispatch, leave the checkpoint so the
 	// undelivered events are refetched on the next poll.
-	if !p.dispatch(ctx, collected, handlerClient) {
+	if !p.dispatch(ctx, selected, handlerClient) {
 		return
 	}
 	p.checkpoints.Set(key, newCp)
 
 	slog.Info("github events poller: poll complete",
 		"connection", key.GithubConnectionID, "org", key.OrgName,
-		"newEvents", len(collected),
+		"newEvents", len(selected),
 		"pollInterval", pollInterval)
 }
 
@@ -282,17 +282,17 @@ func newestEventID(events []*github.Event, fallback string) string {
 	return fallback
 }
 
-// dispatch parses collected events and enqueues them oldest-first, so handlers
+// dispatch parses selected events and enqueues them oldest-first, so handlers
 // see them in chronological order. Each event is paired with handlerClient, the
 // github client for its connection. It returns false if the context was
 // cancelled before every event was enqueued, signalling the caller not to
 // advance the checkpoint.
-func (p *Poller) dispatch(ctx context.Context, collected []*github.Event, handlerClient *ghapi.Client) bool {
-	for i := len(collected) - 1; i >= 0; i-- {
-		evt, err := handlers.ParseEventsAPI(collected[i])
+func (p *Poller) dispatch(ctx context.Context, selected []*github.Event, handlerClient *ghapi.Client) bool {
+	for i := len(selected) - 1; i >= 0; i-- {
+		evt, err := handlers.ParseEventsAPI(selected[i])
 		if err != nil {
 			slog.Error("github events poller: failed to parse payload",
-				"eventID", collected[i].GetID(), "type", collected[i].GetType(), "error", err)
+				"eventID", selected[i].GetID(), "type", selected[i].GetType(), "error", err)
 			continue
 		}
 		if evt == nil {
@@ -305,11 +305,11 @@ func (p *Poller) dispatch(ctx context.Context, collected []*github.Event, handle
 	return true
 }
 
-// collectNewEvents returns the prefix of events (newest-first) that is newer
+// selectNewEvents returns the prefix of events (newest-first) that is newer
 // than lastEventID — everything up to but not including the event matching it.
 // The result is a sub-slice of events, not a copy. hitCheckpoint is true if
 // lastEventID was found on the page.
-func collectNewEvents(events []*github.Event, lastEventID string) (newEvents []*github.Event, hitCheckpoint bool) {
+func selectNewEvents(events []*github.Event, lastEventID string) (newEvents []*github.Event, hitCheckpoint bool) {
 	for i, evt := range events {
 		if lastEventID != "" && evt.GetID() == lastEventID {
 			return events[:i], true
