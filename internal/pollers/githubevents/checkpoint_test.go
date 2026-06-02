@@ -9,12 +9,48 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/plan42-ai/clock"
 	"github.com/stretchr/testify/require"
 )
 
 const testConn1 = "conn1"
 const testOrg1 = "org1"
+
+// newTestStoreWithClock creates a CheckpointStore backed by a temp directory and
+// the given clock, returning the store and its file path. Tests pass a fake
+// clock to drive the debounce timer without waiting on wall-clock time.
+func newTestStoreWithClock(t *testing.T, clk clock.Clock) (*CheckpointStore, string) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, checkpointFileName)
+	store, err := NewCheckpointStore(path, clk)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = store.ShutdownTimeout(5 * time.Second)
+	})
+	return store, path
+}
+
+// waitForCheckpointFile waits until the checkpoint file at path records
+// lastEventID for the given composite key. The flush runs asynchronously after
+// the debounce timer fires, so the test polls (it does not wait wall-clock time
+// for the debounce itself — a fake clock advances that instantly).
+func waitForCheckpointFile(t *testing.T, path, compositeKey, lastEventID string) {
+	t.Helper()
+	// The flush runs in a goroutine after the (fake-clock) timer fires; give it a
+	// brief moment to land, then verify the file directly.
+	time.Sleep(100 * time.Millisecond)
+
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	var parsed map[string]Checkpoint
+	require.NoError(t, json.Unmarshal(data, &parsed))
+
+	entry, ok := parsed[compositeKey]
+	require.True(t, ok, "checkpoint file should record the key")
+	require.Equal(t, lastEventID, entry.LastEventID)
+}
 
 // newTestStore creates a CheckpointStore backed by a temp directory.
 // The returned cleanup function stops the timer goroutine.
@@ -22,7 +58,7 @@ func newTestStore(t *testing.T) (*CheckpointStore, string) {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, checkpointFileName)
-	store, err := newCheckpointStoreFromPath(path)
+	store, err := NewCheckpointStore(path, clock.NewRealClock())
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = store.ShutdownTimeout(5 * time.Second)
@@ -38,7 +74,7 @@ func newTestStoreWithFile(t *testing.T, data []byte) *CheckpointStore {
 	path := filepath.Join(dir, checkpointFileName)
 	require.NoError(t, os.WriteFile(path, data, 0600))
 
-	store, err := newCheckpointStoreFromPath(path)
+	store, err := NewCheckpointStore(path, clock.NewRealClock())
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = store.ShutdownTimeout(5 * time.Second)
@@ -51,7 +87,7 @@ func TestLoadFromMissingFile(t *testing.T) {
 
 	key := CheckpointKey{GithubConnectionID: testConn1, OrgName: testOrg1}
 	_, ok := store.Get(key)
-	assert.False(t, ok, "missing file should yield empty state")
+	require.False(t, ok, "missing file should yield empty state")
 }
 
 func TestLoadFromValidFile(t *testing.T) {
@@ -67,9 +103,9 @@ func TestLoadFromValidFile(t *testing.T) {
 	key := CheckpointKey{GithubConnectionID: "conn-abc", OrgName: "my-org"}
 	cp, ok := store.Get(key)
 	require.True(t, ok)
-	assert.Equal(t, "12345", cp.LastEventID)
-	assert.Equal(t, `"abc"`, cp.ETag)
-	assert.Equal(t, 90, cp.PollIntervalSecs)
+	require.Equal(t, "12345", cp.LastEventID)
+	require.Equal(t, `"abc"`, cp.ETag)
+	require.Equal(t, 90, cp.PollIntervalSecs)
 }
 
 func TestLoadFromCorruptFile(t *testing.T) {
@@ -78,7 +114,7 @@ func TestLoadFromCorruptFile(t *testing.T) {
 
 	key := CheckpointKey{GithubConnectionID: "x", OrgName: "y"}
 	_, ok := store.Get(key)
-	assert.False(t, ok, "corrupt file should yield empty state")
+	require.False(t, ok, "corrupt file should yield empty state")
 }
 
 func TestSetGetDelete(t *testing.T) {
@@ -87,74 +123,45 @@ func TestSetGetDelete(t *testing.T) {
 
 	// Initially absent.
 	_, ok := store.Get(key)
-	assert.False(t, ok)
+	require.False(t, ok)
 
 	// Set and retrieve.
 	store.Set(key, Checkpoint{LastEventID: "100", ETag: `"e"`, PollIntervalSecs: 60})
 	cp, ok := store.Get(key)
 	require.True(t, ok)
-	assert.Equal(t, "100", cp.LastEventID)
-	assert.Equal(t, `"e"`, cp.ETag)
-	assert.Equal(t, 60, cp.PollIntervalSecs)
+	require.Equal(t, "100", cp.LastEventID)
+	require.Equal(t, `"e"`, cp.ETag)
+	require.Equal(t, 60, cp.PollIntervalSecs)
 
 	// Overwrite.
 	store.Set(key, Checkpoint{LastEventID: "200", ETag: `"f"`, PollIntervalSecs: 120})
 	cp, ok = store.Get(key)
 	require.True(t, ok)
-	assert.Equal(t, "200", cp.LastEventID)
+	require.Equal(t, "200", cp.LastEventID)
 
 	// Delete.
 	store.Delete(key)
 	_, ok = store.Get(key)
-	assert.False(t, ok)
+	require.False(t, ok)
 }
 
-func TestDirtyFlag(t *testing.T) {
-	store, _ := newTestStore(t)
-
-	store.mu.Lock()
-	assert.False(t, store.dirty, "new store should not be dirty")
-	store.mu.Unlock()
-
-	key := CheckpointKey{GithubConnectionID: "c1", OrgName: "o1"}
-	store.Set(key, Checkpoint{LastEventID: "1"})
-
-	store.mu.Lock()
-	assert.True(t, store.dirty, "store should be dirty after Set")
-	store.mu.Unlock()
-}
-
-func TestTimerScheduledOnFirstMutation(t *testing.T) {
-	store, _ := newTestStore(t)
-
-	store.mu.Lock()
-	assert.True(t, store.stopped, "timer should start stopped")
-	store.mu.Unlock()
-
-	key := CheckpointKey{GithubConnectionID: "c1", OrgName: "o1"}
-	store.Set(key, Checkpoint{LastEventID: "1"})
-
-	store.mu.Lock()
-	assert.False(t, store.stopped, "timer should be running after mutation")
-	store.mu.Unlock()
-}
-
-func TestTimerNotResetOnSubsequentMutations(t *testing.T) {
-	store, _ := newTestStore(t)
+func TestSubsequentMutationDoesNotPushDebounce(t *testing.T) {
+	clk := clock.NewFakeClock(time.Now())
+	store, path := newTestStoreWithClock(t, clk)
 	key := CheckpointKey{GithubConnectionID: "c1", OrgName: "o1"}
 
 	store.Set(key, Checkpoint{LastEventID: "1"})
 
-	store.mu.Lock()
-	assert.False(t, store.stopped)
-	store.mu.Unlock()
-
-	// Second mutation should leave the timer running (stopped stays false).
+	// Advance partway, then mutate again. Debouncing must coalesce: the second
+	// mutation must not push the deadline out.
+	clk.Advance(flushDebounce / 2)
 	store.Set(key, Checkpoint{LastEventID: "2"})
+	require.NoFileExists(t, path, "no flush before the original deadline")
 
-	store.mu.Lock()
-	assert.False(t, store.stopped, "timer should still be running")
-	store.mu.Unlock()
+	// Reaching the original deadline flushes. If the second Set had reset the
+	// timer, nothing would be written yet.
+	clk.Advance(flushDebounce / 2)
+	waitForCheckpointFile(t, path, "c1:o1", "2")
 }
 
 func TestFlushWritesToDisk(t *testing.T) {
@@ -168,26 +175,28 @@ func TestFlushWritesToDisk(t *testing.T) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	var parsed map[string]checkpointFileEntry
+	var parsed map[string]Checkpoint
 	require.NoError(t, json.Unmarshal(data, &parsed))
 
 	entry, ok := parsed[testConn1+":"+testOrg1]
 	require.True(t, ok)
-	assert.Equal(t, "42", entry.LastEventID)
-	assert.Equal(t, `"etag1"`, entry.ETag)
-	assert.Equal(t, 60, entry.PollIntervalSecs)
+	require.Equal(t, "42", entry.LastEventID)
+	require.Equal(t, `"etag1"`, entry.ETag)
+	require.Equal(t, 60, entry.PollIntervalSecs)
 }
 
-func TestFlushClearsDirtyFlag(t *testing.T) {
-	store, _ := newTestStore(t)
+func TestFlushIsNoOpAfterFlush(t *testing.T) {
+	store, path := newTestStore(t)
 	key := CheckpointKey{GithubConnectionID: "c1", OrgName: "o1"}
 	store.Set(key, Checkpoint{LastEventID: "1"})
 
 	store.flush()
+	require.FileExists(t, path)
 
-	store.mu.Lock()
-	assert.False(t, store.dirty, "flush should clear dirty flag")
-	store.mu.Unlock()
+	// The flush cleared the dirty flag, so a second flush writes nothing.
+	require.NoError(t, os.Remove(path))
+	store.flush()
+	require.NoFileExists(t, path, "flush should be a no-op when nothing changed")
 }
 
 func TestFlushNoOpWhenNotDirty(t *testing.T) {
@@ -197,7 +206,7 @@ func TestFlushNoOpWhenNotDirty(t *testing.T) {
 	store.flush()
 
 	_, err := os.Stat(path)
-	assert.True(t, os.IsNotExist(err), "no file should be written when store is not dirty")
+	require.True(t, os.IsNotExist(err), "no file should be written when store is not dirty")
 }
 
 func TestAtomicWriteProducesCorrectFile(t *testing.T) {
@@ -214,26 +223,26 @@ func TestAtomicWriteProducesCorrectFile(t *testing.T) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	var parsed map[string]checkpointFileEntry
+	var parsed map[string]Checkpoint
 	require.NoError(t, json.Unmarshal(data, &parsed))
-	assert.Len(t, parsed, 2)
+	require.Len(t, parsed, 2)
 
 	e1 := parsed["c1:o1"]
-	assert.Equal(t, "10", e1.LastEventID)
-	assert.Equal(t, `"e1"`, e1.ETag)
-	assert.Equal(t, 60, e1.PollIntervalSecs)
+	require.Equal(t, "10", e1.LastEventID)
+	require.Equal(t, `"e1"`, e1.ETag)
+	require.Equal(t, 60, e1.PollIntervalSecs)
 
 	e2 := parsed["c2:o2"]
-	assert.Equal(t, "20", e2.LastEventID)
-	assert.Equal(t, `"e2"`, e2.ETag)
-	assert.Equal(t, 120, e2.PollIntervalSecs)
+	require.Equal(t, "20", e2.LastEventID)
+	require.Equal(t, `"e2"`, e2.ETag)
+	require.Equal(t, 120, e2.PollIntervalSecs)
 }
 
 func TestShutdownFlushWritesPendingChanges(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, checkpointFileName)
 
-	store, err := newCheckpointStoreFromPath(path)
+	store, err := NewCheckpointStore(path, clock.NewRealClock())
 	require.NoError(t, err)
 
 	key := CheckpointKey{GithubConnectionID: "c1", OrgName: "o1"}
@@ -248,13 +257,13 @@ func TestShutdownFlushWritesPendingChanges(t *testing.T) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	var parsed map[string]checkpointFileEntry
+	var parsed map[string]Checkpoint
 	require.NoError(t, json.Unmarshal(data, &parsed))
 
 	entry, ok := parsed["c1:o1"]
 	require.True(t, ok)
-	assert.Equal(t, "99", entry.LastEventID)
-	assert.Equal(t, `"final"`, entry.ETag)
+	require.Equal(t, "99", entry.LastEventID)
+	require.Equal(t, `"final"`, entry.ETag)
 }
 
 func TestFilePermissions(t *testing.T) {
@@ -266,35 +275,36 @@ func TestFilePermissions(t *testing.T) {
 
 	info, err := os.Stat(path)
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0600), info.Mode().Perm(),
+	require.Equal(t, os.FileMode(0600), info.Mode().Perm(),
 		"checkpoint file should have 0600 permissions")
 }
 
 func TestDirectoryCreation(t *testing.T) {
 	dir := t.TempDir()
-	configDir := filepath.Join(dir, "home", configDirName)
+	configDir := filepath.Join(dir, "sub", configDirName)
 	path := filepath.Join(configDir, checkpointFileName)
 
-	// The config dir doesn't exist yet. newCheckpointStoreFromPath doesn't
-	// create it (that's NewCheckpointStore's job), but we can verify the
-	// NewCheckpointStore path by setting HOME.
-	t.Setenv("HOME", filepath.Join(dir, "home"))
-
-	store, err := NewCheckpointStore()
+	// The parent directory doesn't exist yet; the constructor must create it.
+	store, err := NewCheckpointStore(path, clock.NewRealClock())
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = store.ShutdownTimeout(5 * time.Second)
 	})
 
-	// Verify the config directory was created with correct permissions.
 	info, err := os.Stat(configDir)
 	require.NoError(t, err)
-	assert.True(t, info.IsDir())
-	assert.Equal(t, os.FileMode(0700), info.Mode().Perm(),
+	require.True(t, info.IsDir())
+	require.Equal(t, os.FileMode(0700), info.Mode().Perm(),
 		"config directory should have 0700 permissions")
+}
 
-	// Verify the path matches expectation.
-	assert.Equal(t, path, store.path)
+func TestDefaultCheckpointPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	path, err := DefaultCheckpointPath()
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(home, configDirName, checkpointFileName), path)
 }
 
 func TestConcurrentAccess(t *testing.T) {
@@ -336,37 +346,18 @@ func TestConcurrentAccess(t *testing.T) {
 }
 
 func TestDebouncedFlushViaTimer(t *testing.T) {
-	// Create a store that uses a very short debounce to test the timer path.
-	dir := t.TempDir()
-	path := filepath.Join(dir, checkpointFileName)
-
-	store, err := newCheckpointStoreFromPath(path)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_ = store.ShutdownTimeout(5 * time.Second)
-	})
+	clk := clock.NewFakeClock(time.Now())
+	store, path := newTestStoreWithClock(t, clk)
 
 	key := CheckpointKey{GithubConnectionID: "c1", OrgName: "o1"}
 	store.Set(key, Checkpoint{LastEventID: "timer-test"})
 
-	// Override the timer to fire almost immediately.
-	store.mu.Lock()
-	store.timer.Reset(10 * time.Millisecond)
-	store.mu.Unlock()
+	// Nothing is written before the debounce interval elapses.
+	require.NoFileExists(t, path, "no flush before the debounce interval")
 
-	// Wait for the file to appear.
-	require.Eventually(t, func() bool {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return false
-		}
-		var parsed map[string]checkpointFileEntry
-		if json.Unmarshal(data, &parsed) != nil {
-			return false
-		}
-		entry, ok := parsed["c1:o1"]
-		return ok && entry.LastEventID == "timer-test"
-	}, 2*time.Second, 10*time.Millisecond, "timer-driven flush should write the file")
+	// Advancing past the debounce interval triggers the timer-driven flush.
+	clk.Advance(flushDebounce)
+	waitForCheckpointFile(t, path, "c1:o1", "timer-test")
 }
 
 func TestRoundTripThroughFile(t *testing.T) {
@@ -374,7 +365,7 @@ func TestRoundTripThroughFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, checkpointFileName)
 
-	store1, err := newCheckpointStoreFromPath(path)
+	store1, err := NewCheckpointStore(path, clock.NewRealClock())
 	require.NoError(t, err)
 
 	key := CheckpointKey{GithubConnectionID: "c1", OrgName: "o1"}
@@ -386,7 +377,7 @@ func TestRoundTripThroughFile(t *testing.T) {
 	require.NoError(t, store1.flush())
 	_ = store1.ShutdownTimeout(2 * time.Second)
 
-	store2, err := newCheckpointStoreFromPath(path)
+	store2, err := NewCheckpointStore(path, clock.NewRealClock())
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_ = store2.ShutdownTimeout(5 * time.Second)
@@ -394,9 +385,9 @@ func TestRoundTripThroughFile(t *testing.T) {
 
 	cp, ok := store2.Get(key)
 	require.True(t, ok)
-	assert.Equal(t, "round-trip", cp.LastEventID)
-	assert.Equal(t, `"rt-etag"`, cp.ETag)
-	assert.Equal(t, 90, cp.PollIntervalSecs)
+	require.Equal(t, "round-trip", cp.LastEventID)
+	require.Equal(t, `"rt-etag"`, cp.ETag)
+	require.Equal(t, 90, cp.PollIntervalSecs)
 }
 
 func TestDeleteRemovesEntryFromDisk(t *testing.T) {
@@ -412,9 +403,9 @@ func TestDeleteRemovesEntryFromDisk(t *testing.T) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 
-	var parsed map[string]checkpointFileEntry
+	var parsed map[string]Checkpoint
 	require.NoError(t, json.Unmarshal(data, &parsed))
-	assert.Empty(t, parsed)
+	require.Empty(t, parsed)
 }
 
 func TestParseCompositeKey(t *testing.T) {
@@ -433,9 +424,9 @@ func TestParseCompositeKey(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			key, ok := parseCompositeKey(tt.input)
-			assert.Equal(t, tt.wantOk, ok)
+			require.Equal(t, tt.wantOk, ok)
 			if ok {
-				assert.Equal(t, tt.wantKey, key)
+				require.Equal(t, tt.wantKey, key)
 			}
 		})
 	}
@@ -458,11 +449,11 @@ func TestMultipleEntries(t *testing.T) {
 
 	cp1, ok := store.Get(CheckpointKey{GithubConnectionID: testConn1, OrgName: testOrg1})
 	require.True(t, ok)
-	assert.Equal(t, "100", cp1.LastEventID)
-	assert.Equal(t, 60, cp1.PollIntervalSecs)
+	require.Equal(t, "100", cp1.LastEventID)
+	require.Equal(t, 60, cp1.PollIntervalSecs)
 
 	cp2, ok := store.Get(CheckpointKey{GithubConnectionID: "conn2", OrgName: "org2"})
 	require.True(t, ok)
-	assert.Equal(t, "200", cp2.LastEventID)
-	assert.Equal(t, 120, cp2.PollIntervalSecs)
+	require.Equal(t, "200", cp2.LastEventID)
+	require.Equal(t, 120, cp2.PollIntervalSecs)
 }

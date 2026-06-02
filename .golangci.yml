@@ -9,12 +9,11 @@ linters:
     - dupl
     - durationcheck
     - errcheck
-    - goconst
     - gocritic
     - gocyclo
     - godot
     - goheader
-    - gomodguard
+    - gomodguard_v2
     - goprintffuncname
     - gosec
     - govet

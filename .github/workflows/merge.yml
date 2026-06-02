@@ -13,12 +13,12 @@ jobs:
     permissions:
       contents: read
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
-        go-version: '1.25.5'
+        go-version: '1.26.2'
 
     - name: install deps
       run: |
@@ -29,9 +29,9 @@ jobs:
         git config --global url."https://${{ secrets.PRIVATE_REPO_PULL_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
     - name: golangci-lint
-      uses: golangci/golangci-lint-action@v7
+      uses: golangci/golangci-lint-action@v9
       with:
-        version: v2.7.2
+        version: v2.12.0
 
     - name: Test
       run: make test
@@ -40,7 +40,7 @@ jobs:
       run: make package
 
     - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: build-${{ matrix.os }}
         path: dist/*
@@ -52,16 +52,16 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Download Build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
       - name: Generate Version
         id: ghversion
         run: make gh-version
       - name: Release
-        uses: softprops/action-gh-release@v2.0.8
+        uses: softprops/action-gh-release@v2
         with:
           files: "dist/**"
           tag_name: "v${{steps.ghversion.outputs.version}}"

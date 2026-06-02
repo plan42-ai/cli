@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"math"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/google/renameio/v2"
+	"github.com/plan42-ai/clock"
 	"github.com/plan42-ai/concurrency"
 )
 
@@ -36,15 +36,9 @@ type ConnectionInfo struct {
 	User    string
 }
 
-// Checkpoint holds the durable state for a single polling pair.
+// Checkpoint holds the durable state for a single polling pair. The JSON tags
+// define the on-disk file format.
 type Checkpoint struct {
-	LastEventID      string
-	ETag             string
-	PollIntervalSecs int
-}
-
-// checkpointFileEntry is the JSON-serializable form of a single checkpoint.
-type checkpointFileEntry struct {
 	LastEventID      string `json:"last_event_id"`
 	ETag             string `json:"etag"`
 	PollIntervalSecs int    `json:"poll_interval_seconds"`
@@ -58,33 +52,33 @@ type CheckpointStore struct {
 	mu      sync.Mutex
 	entries map[CheckpointKey]Checkpoint
 	dirty   bool
-	timer   *time.Timer
+	clock   clock.Clock
+	timer   clock.Timer
 	stopped bool
 	path    string
 	cg      *concurrency.ContextGroup
 }
 
-// NewCheckpointStore creates a CheckpointStore, loading any existing checkpoint
-// file from ~/.config/plan42-runner.checkpoint.json. A missing file is treated
-// as empty. An unparseable file is logged and treated as empty.
-func NewCheckpointStore() (*CheckpointStore, error) {
+// DefaultCheckpointPath returns the default checkpoint file path,
+// ~/.config/plan42-runner.checkpoint.json.
+func DefaultCheckpointPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-
-	configDir := filepath.Join(home, configDirName)
-	if err := os.MkdirAll(configDir, configDirPerm); err != nil {
-		return nil, err
-	}
-
-	path := filepath.Join(configDir, checkpointFileName)
-	return newCheckpointStoreFromPath(path)
+	return filepath.Join(home, configDirName, checkpointFileName), nil
 }
 
-// newCheckpointStoreFromPath is the internal constructor that accepts an
-// explicit file path. It creates its own ContextGroup for the watchTimer.
-func newCheckpointStoreFromPath(path string) (*CheckpointStore, error) {
+// NewCheckpointStore creates a CheckpointStore backed by the file at path, using
+// clk for its debounce timer. The parent directory is created if needed. Any
+// existing file is loaded; a missing or unparseable file is treated as empty.
+// The debounce timer (and the goroutine that watches it) is created lazily on
+// the first mutation.
+func NewCheckpointStore(path string, clk clock.Clock) (*CheckpointStore, error) {
+	if err := os.MkdirAll(filepath.Dir(path), configDirPerm); err != nil {
+		return nil, err
+	}
+
 	entries := make(map[CheckpointKey]Checkpoint)
 	data, err := os.ReadFile(path)
 	if err == nil {
@@ -95,28 +89,18 @@ func newCheckpointStoreFromPath(path string) (*CheckpointStore, error) {
 		slog.Error("failed to read checkpoint file; starting with empty state", "path", path, "error", err)
 	}
 
-	// Create a stopped timer: fire far in the future, then immediately stop.
-	timer := time.NewTimer(time.Duration(math.MaxInt64))
-	timer.Stop()
-
-	cg := concurrency.NewContextGroup()
-	s := &CheckpointStore{
+	return &CheckpointStore{
 		entries: entries,
-		timer:   timer,
+		clock:   clk,
 		stopped: true,
 		path:    path,
-		cg:      cg,
-	}
-
-	cg.Add(1)
-	go s.watchTimer()
-
-	return s, nil
+		cg:      concurrency.NewContextGroup(),
+	}, nil
 }
 
 // parseCheckpointFile parses the JSON checkpoint data into the entries map.
 func parseCheckpointFile(data []byte, entries map[CheckpointKey]Checkpoint) error {
-	var raw map[string]checkpointFileEntry
+	var raw map[string]Checkpoint
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
@@ -125,7 +109,7 @@ func parseCheckpointFile(data []byte, entries map[CheckpointKey]Checkpoint) erro
 		if !ok {
 			continue
 		}
-		entries[key] = Checkpoint(entry)
+		entries[key] = entry
 	}
 	return nil
 }
@@ -172,30 +156,37 @@ func (s *CheckpointStore) Delete(key CheckpointKey) {
 	s.markDirty()
 }
 
-// markDirty sets the dirty flag and schedules the timer if it is stopped.
-// Must be called with s.mu held.
+// markDirty sets the dirty flag and schedules a debounced flush if one isn't
+// already pending. The timer (and its watcher goroutine) is created on the first
+// scheduling and reused thereafter. Must be called with s.mu held.
 func (s *CheckpointStore) markDirty() {
 	s.dirty = true
-	if s.stopped {
-		s.timer.Reset(flushDebounce)
-		s.stopped = false
+	if !s.stopped {
+		return // a flush is already scheduled; coalesce into it
 	}
+	s.stopped = false
+	if s.timer == nil {
+		s.timer = s.clock.NewTimer(flushDebounce)
+		s.cg.Add(1)
+		go s.watchTimer(s.timer)
+		return
+	}
+	s.timer.Reset(flushDebounce)
 }
 
-// watchTimer waits for the debounce timer to fire and schedules a flush.
-func (s *CheckpointStore) watchTimer() {
+// watchTimer waits for the debounce timer to fire and flushes. The flush runs
+// inline on this single goroutine (not in a spawned one) so flushes are
+// serialized: a later flush can never start while an earlier one is still
+// writing, which would let the older write stomp the newer state on disk.
+func (s *CheckpointStore) watchTimer(timer clock.Timer) {
 	defer s.cg.Done()
 	ctx := s.cg.Context()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-s.timer.C:
-			s.cg.Add(1)
-			go func() {
-				defer s.cg.Done()
-				s.flushWithRetry()
-			}()
+		case <-timer.C():
+			s.flushWithRetry()
 		}
 	}
 }
@@ -237,7 +228,7 @@ func (s *CheckpointStore) retryAfterFailure() {
 // snapshot atomically marks the timer as stopped, checks the dirty flag, and
 // if dirty returns a serializable copy of the entries map with dirty cleared.
 // Returns (nil, false) when no flush is needed.
-func (s *CheckpointStore) snapshot() (map[string]checkpointFileEntry, bool) {
+func (s *CheckpointStore) snapshot() (map[string]Checkpoint, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.stopped = true
@@ -245,9 +236,9 @@ func (s *CheckpointStore) snapshot() (map[string]checkpointFileEntry, bool) {
 		return nil, false
 	}
 	s.dirty = false
-	out := make(map[string]checkpointFileEntry, len(s.entries))
+	out := make(map[string]Checkpoint, len(s.entries))
 	for k, v := range s.entries {
-		out[compositeKey(k)] = checkpointFileEntry(v)
+		out[compositeKey(k)] = v
 	}
 	return out, true
 }
@@ -270,10 +261,13 @@ func (s *CheckpointStore) ShutdownTimeout(timeout time.Duration) error {
 	return s.Shutdown(ctx)
 }
 
-// stopTimer stops the debounce timer under the mutex.
+// stopTimer stops the debounce timer under the mutex. The timer is nil if the
+// store was never mutated.
 func (s *CheckpointStore) stopTimer() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.timer.Stop()
+	if s.timer != nil {
+		s.timer.Stop()
+	}
 	s.stopped = true
 }

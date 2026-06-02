@@ -108,7 +108,6 @@ func (p *Poller) discover(ctx context.Context) {
 		slog.ErrorContext(ctx, "environment discovery: ListEnvironments failed", "error", err)
 		return
 	}
-
 	p.eventPoller.UpdateTargets(desired)
 }
 
