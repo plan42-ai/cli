@@ -95,28 +95,61 @@ func (p *Poller) Close() error {
 
 // UpdateTargets starts goroutines for new targets and stops goroutines for
 // removed targets. It satisfies the environments.EventPoller interface.
+//
+// Removal happens in two passes: cancel every removed target first, then wait
+// for each to exit and delete its checkpoint. Cancelling all before waiting
+// means one slow target can't keep the others polling. The work is synchronous
+// under p.mu, which is what makes the checkpoint delete safe: a cancelled
+// target can no longer write its checkpoint once done is closed, and no
+// concurrent UpdateTargets can re-add the target between the wait and the
+// delete. The lock order is always Poller -> Checkpoints (a polling goroutine
+// never takes p.mu), so waiting under the lock can't deadlock.
 func (p *Poller) UpdateTargets(desired map[CheckpointKey]ConnectionInfo) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Stop goroutines for targets no longer in the desired set. We cancel the
-	// goroutine, wait for it to fully exit, then delete its checkpoint — all
-	// synchronously while holding p.mu. Waiting under the lock is what makes
-	// the delete safe: the polling goroutine can no longer write the checkpoint
-	// once done is closed, and no concurrent UpdateTargets can re-add the target
-	// between the wait and the delete.
-	for key, tgt := range p.targets {
-		if _, ok := desired[key]; !ok {
-			slog.Info("github events poller: stopping target",
-				"connection", key.GithubConnectionID, "org", key.OrgName)
-			tgt.cancel()
-			delete(p.targets, key)
-			<-tgt.done
-			p.checkpoints.Delete(key)
-		}
-	}
+	removed := p.cancelRemovedTargets(desired)
+	p.waitForRemovedTargets(removed)
+	p.startNewTargets(desired)
+}
 
-	// Start goroutines for new targets.
+// removedTarget carries what waitForRemovedTargets needs to finish stopping a
+// cancelled target.
+type removedTarget struct {
+	key  CheckpointKey
+	done chan struct{}
+}
+
+// cancelRemovedTargets cancels and unregisters every running target not in
+// desired, returning them so the caller can wait for their goroutines to exit.
+// Must be called with p.mu held.
+func (p *Poller) cancelRemovedTargets(desired map[CheckpointKey]ConnectionInfo) []removedTarget {
+	var removed []removedTarget
+	for key, tgt := range p.targets {
+		if _, ok := desired[key]; ok {
+			continue
+		}
+		slog.Info("github events poller: stopping target",
+			"connection", key.GithubConnectionID, "org", key.OrgName)
+		tgt.cancel()
+		delete(p.targets, key)
+		removed = append(removed, removedTarget{key: key, done: tgt.done})
+	}
+	return removed
+}
+
+// waitForRemovedTargets waits for each cancelled target's goroutine to exit,
+// then deletes its checkpoint. Must be called with p.mu held.
+func (p *Poller) waitForRemovedTargets(removed []removedTarget) {
+	for _, r := range removed {
+		<-r.done
+		p.checkpoints.Delete(r.key)
+	}
+}
+
+// startNewTargets starts a polling goroutine for each desired target not already
+// running. Must be called with p.mu held.
+func (p *Poller) startNewTargets(desired map[CheckpointKey]ConnectionInfo) {
 	for key, info := range desired {
 		if _, ok := p.targets[key]; ok {
 			continue
