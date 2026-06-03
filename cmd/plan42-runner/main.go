@@ -39,8 +39,6 @@ func main() {
 		panic(util.ExitCode(2))
 	}
 
-	// --- Event polling stack ---
-
 	// 1. Checkpoint store: persists polling state across restarts.
 	cpPath, err := githubevents.DefaultCheckpointPath()
 	if err != nil {
@@ -71,10 +69,11 @@ func main() {
 	// 5. Environment discovery: reconciles the poller's target set by
 	// periodically querying the Plan42 API. Starts its loop immediately.
 	envPoller := environments.New(environments.Config{
-		Client:      options.Client,
-		TenantID:    tokenID,
-		RunnerID:    runnerID,
-		EventPoller: poller,
+		Client:        options.Client,
+		TenantID:      tokenID,
+		RunnerID:      runnerID,
+		EventPoller:   poller,
+		ConnectionIdx: options.ConnectionIdx,
 	})
 
 	msgPoller := messages.New(options.Client, tokenID, runnerID, options.PollerOptions()...)
@@ -116,7 +115,7 @@ func main() {
 		slog.Info("event dispatcher stopped")
 	}
 
-	// 4. Stop the message poller (unchanged behavior).
+	// 4. Stop the message poller.
 	slog.Info("Draining message queues.")
 	err = msgPoller.ShutdownTimeout(shutdownTimeout)
 	if err != nil {

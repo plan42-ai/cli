@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/plan42-ai/cli/internal/config"
 	"github.com/plan42-ai/cli/internal/pollers/environments"
 	"github.com/plan42-ai/cli/internal/pollers/githubevents"
 	"github.com/plan42-ai/cli/internal/util"
@@ -52,7 +53,6 @@ func defaultFixture() apiFixture {
 				Private:         true,
 				RunnerID:        util.Pointer(testRunnerID),
 				GithubUserLogin: util.Pointer(testUserLogin),
-				OAuthToken:      util.Pointer(testToken),
 			},
 		},
 		envs: []p42.Environment{
@@ -61,6 +61,16 @@ func defaultFixture() apiFixture {
 				GithubConnectionID: util.Pointer(testConnID),
 				Repos:              []string{testOrgName + "/repo-a"},
 			},
+		},
+	}
+}
+
+func defaultConnectionIdx() map[string]*config.GithubInfo {
+	return map[string]*config.GithubInfo{
+		testConnID: {
+			ConnectionID: testConnID,
+			Token:        testToken,
+			URL:          "",
 		},
 	}
 }
@@ -135,10 +145,11 @@ func TestDiscoveryReconcilePoll(t *testing.T) {
 	poller := githubevents.NewPoller(githubevents.Config{Checkpoints: store})
 
 	envPoller := environments.New(environments.Config{
-		Client:      client,
-		TenantID:    testTenantID,
-		RunnerID:    testRunnerID,
-		EventPoller: poller,
+		Client:        client,
+		TenantID:      testTenantID,
+		RunnerID:      testRunnerID,
+		EventPoller:   poller,
+		ConnectionIdx: defaultConnectionIdx(),
 	})
 
 	// Wait for at least one reconcile cycle.
@@ -174,8 +185,6 @@ func TestEventFlowEndToEnd(t *testing.T) {
 	defer ghServer.Close()
 
 	fix := defaultFixture()
-	// Override the connection token so the poller authenticates against our mock.
-	fix.connections[0].OAuthToken = util.Pointer(testToken)
 	p42Server := newPlan42Server(t, fix)
 	client := p42.NewClient(p42Server.URL, p42.WithAPIToken("test-token"))
 
@@ -325,10 +334,11 @@ func TestGracefulShutdownNoLeaks(t *testing.T) {
 
 	// Start env discovery, which will reconcile the poller with targets.
 	envPoller := environments.New(environments.Config{
-		Client:      client,
-		TenantID:    testTenantID,
-		RunnerID:    testRunnerID,
-		EventPoller: poller,
+		Client:        client,
+		TenantID:      testTenantID,
+		RunnerID:      testRunnerID,
+		EventPoller:   poller,
+		ConnectionIdx: defaultConnectionIdx(),
 	})
 
 	// Wait for at least one target to appear and one poll to happen.
@@ -379,7 +389,6 @@ func TestEndToEndWithMultipleOrgs(t *testing.T) {
 				Private:         true,
 				RunnerID:        util.Pointer(testRunnerID),
 				GithubUserLogin: util.Pointer(testUserLogin),
-				OAuthToken:      util.Pointer(testToken),
 			},
 		},
 		envs: []p42.Environment{
@@ -398,10 +407,11 @@ func TestEndToEndWithMultipleOrgs(t *testing.T) {
 	poller := githubevents.NewPoller(githubevents.Config{Checkpoints: store})
 
 	envPoller := environments.New(environments.Config{
-		Client:      client,
-		TenantID:    testTenantID,
-		RunnerID:    testRunnerID,
-		EventPoller: poller,
+		Client:        client,
+		TenantID:      testTenantID,
+		RunnerID:      testRunnerID,
+		EventPoller:   poller,
+		ConnectionIdx: defaultConnectionIdx(),
 	})
 
 	// Wait for both targets to appear.
