@@ -298,6 +298,24 @@ func TestAddListOptions(t *testing.T) {
 	}
 }
 
+func TestIsPublicGitHub(t *testing.T) {
+	tests := []struct {
+		url  string
+		want bool
+	}{
+		{"", true},
+		{"https://api.github.com", true},
+		{"https://github.com", true},
+		{"https://ghes.example.com", false},
+		{"https://github.example.com", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			require.Equal(t, tt.want, isPublicGitHub(tt.url))
+		})
+	}
+}
+
 // testEvent is a minimal Event implementation for tests.
 type testEvent struct {
 	evtType  string
