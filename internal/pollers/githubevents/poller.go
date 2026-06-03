@@ -386,6 +386,14 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 	}
 }
 
+// isPublicGitHub returns true if baseURL refers to public GitHub (or is empty).
+// Runner configs may use "https://github.com" as the URL for public GitHub
+// connections, but the go-github client needs "https://api.github.com" (or
+// empty) to target the correct API endpoint.
+func isPublicGitHub(baseURL string) bool {
+	return baseURL == "" || baseURL == "https://api.github.com" || baseURL == "https://github.com"
+}
+
 // newEventsClient builds a go-github client for polling the Events API.
 func newEventsClient(info ConnectionInfo) (*github.Client, error) {
 	httpClient := &http.Client{
@@ -395,7 +403,7 @@ func newEventsClient(info ConnectionInfo) (*github.Client, error) {
 		},
 	}
 	gh := github.NewClient(httpClient)
-	if info.BaseURL != "" && info.BaseURL != "https://api.github.com" {
+	if !isPublicGitHub(info.BaseURL) {
 		var err error
 		gh, err = gh.WithEnterpriseURLs(info.BaseURL, info.BaseURL)
 		if err != nil {
@@ -415,7 +423,13 @@ func newHandlerClient(info ConnectionInfo) (*ghapi.Client, error) {
 			wrapped: http.DefaultTransport,
 		},
 	}
-	return ghapi.NewClient(httpClient, info.BaseURL)
+	// Normalize "https://github.com" to "" so the shared library's NewClient
+	// targets https://api.github.com instead of treating it as Enterprise.
+	baseURL := info.BaseURL
+	if isPublicGitHub(baseURL) {
+		baseURL = ""
+	}
+	return ghapi.NewClient(httpClient, baseURL)
 }
 
 type tokenTransport struct {

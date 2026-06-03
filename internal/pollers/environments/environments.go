@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/plan42-ai/cli/internal/config"
 	"github.com/plan42-ai/cli/internal/pollers/githubevents"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/concurrency"
@@ -28,30 +29,33 @@ type EventPoller interface {
 
 // Config holds the dependencies for the environment discovery poller.
 type Config struct {
-	Client      *p42.Client
-	TenantID    string
-	RunnerID    string
-	EventPoller EventPoller
+	Client        *p42.Client
+	TenantID      string
+	RunnerID      string
+	EventPoller   EventPoller
+	ConnectionIdx map[string]*config.GithubInfo
 }
 
 // Poller implements the environment discovery polling loop.
 type Poller struct {
-	client      *p42.Client
-	tenantID    string
-	runnerID    string
-	eventPoller EventPoller
-	cg          *concurrency.ContextGroup
+	client        *p42.Client
+	tenantID      string
+	runnerID      string
+	eventPoller   EventPoller
+	connectionIdx map[string]*config.GithubInfo
+	cg            *concurrency.ContextGroup
 }
 
 // New creates and starts a new environment discovery Poller. The poller
 // is fully running when returned.
 func New(cfg Config) *Poller {
 	p := &Poller{
-		client:      cfg.Client,
-		tenantID:    cfg.TenantID,
-		runnerID:    cfg.RunnerID,
-		eventPoller: cfg.EventPoller,
-		cg:          concurrency.NewContextGroup(),
+		client:        cfg.Client,
+		tenantID:      cfg.TenantID,
+		runnerID:      cfg.RunnerID,
+		eventPoller:   cfg.EventPoller,
+		connectionIdx: cfg.ConnectionIdx,
+		cg:            concurrency.NewContextGroup(),
 	}
 	p.cg.Add(1)
 	go p.run()
@@ -103,7 +107,7 @@ func (p *Poller) discover(ctx context.Context) {
 		return
 	}
 
-	desired, err := getTargetOrgs(ctx, p.client, p.tenantID, defaultConnID, privateConns)
+	desired, err := getTargetOrgs(ctx, p.client, p.tenantID, defaultConnID, privateConns, p.connectionIdx)
 	if err != nil {
 		slog.ErrorContext(ctx, "environment discovery: ListEnvironments failed", "error", err)
 		return
@@ -133,7 +137,7 @@ func extractOrg(repo string) string {
 // connection ID.
 func getPrivateConnections(ctx context.Context, client *p42.Client, tenantID, runnerID string) (map[string]*p42.GithubConnection, error) {
 	conns := make(map[string]*p42.GithubConnection)
-	req := &p42.ListGithubConnectionsRequest{TenantID: tenantID}
+	req := &p42.ListGithubConnectionsRequest{TenantID: tenantID, Private: util.Pointer(true)}
 	for {
 		resp, err := client.ListGithubConnections(ctx, req)
 		if err != nil {
@@ -159,6 +163,7 @@ func getTargetOrgs(
 	client *p42.Client,
 	tenantID, defaultConnID string,
 	privateConns map[string]*p42.GithubConnection,
+	connectionIdx map[string]*config.GithubInfo,
 ) (map[githubevents.CheckpointKey]githubevents.ConnectionInfo, error) {
 	desired := make(map[githubevents.CheckpointKey]githubevents.ConnectionInfo)
 	req := &p42.ListEnvironmentsRequest{TenantID: tenantID}
@@ -172,8 +177,14 @@ func getTargetOrgs(
 			if effectiveConnID == "" {
 				continue
 			}
-			conn, ok := privateConns[effectiveConnID]
+			_, ok := privateConns[effectiveConnID]
 			if !ok {
+				continue
+			}
+			localInfo := connectionIdx[effectiveConnID]
+			if localInfo == nil || localInfo.Token == "" {
+				slog.ErrorContext(ctx, "environment discovery: no local credentials for connection; skipping",
+					"connectionID", effectiveConnID)
 				continue
 			}
 			for _, repo := range env.Repos {
@@ -187,9 +198,9 @@ func getTargetOrgs(
 				}
 				if _, exists := desired[key]; !exists {
 					desired[key] = githubevents.ConnectionInfo{
-						Token:   util.Deref(conn.OAuthToken),
-						BaseURL: "",
-						User:    util.Deref(conn.GithubUserLogin),
+						Token:   localInfo.Token,
+						BaseURL: localInfo.URL,
+						User:    util.Deref(privateConns[effectiveConnID].GithubUserLogin),
 					}
 				}
 			}

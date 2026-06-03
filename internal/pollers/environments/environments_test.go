@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/plan42-ai/cli/internal/config"
 	"github.com/plan42-ai/cli/internal/pollers/githubevents"
 	"github.com/plan42-ai/cli/internal/util"
 	"github.com/plan42-ai/sdk-go/p42"
@@ -28,6 +29,7 @@ const (
 	testEnvID3     = "env-3"
 	testOrgName    = "my-org"
 	testDefaultCID = "default-conn"
+	testGHESURL    = "https://ghes.example.com"
 )
 
 // mockEventPoller records calls to UpdateTargets.
@@ -73,9 +75,10 @@ func (m *mockEventPoller) waitForCall(ctx context.Context) bool {
 }
 
 type apiFixture struct {
-	tenant      *p42.Tenant
-	connections []*p42.GithubConnection
-	envs        []p42.Environment
+	tenant        *p42.Tenant
+	connections   []*p42.GithubConnection
+	envs          []p42.Environment
+	connectionIdx map[string]*config.GithubInfo
 }
 
 func defaultFixture() apiFixture {
@@ -90,7 +93,6 @@ func defaultFixture() apiFixture {
 				Private:         true,
 				RunnerID:        util.Pointer(testRunnerID),
 				GithubUserLogin: util.Pointer(testUserLogin),
-				OAuthToken:      util.Pointer(testToken),
 			},
 		},
 		envs: []p42.Environment{
@@ -98,6 +100,13 @@ func defaultFixture() apiFixture {
 				EnvironmentID:      testEnvID1,
 				GithubConnectionID: util.Pointer(testConnID1),
 				Repos:              []string{testOrgName + "/repo-a", testOrgName + "/repo-b"},
+			},
+		},
+		connectionIdx: map[string]*config.GithubInfo{
+			testConnID1: {
+				ConnectionID: testConnID1,
+				Token:        testToken,
+				URL:          testGHESURL,
 			},
 		},
 	}
@@ -127,14 +136,15 @@ func newMockServer(t *testing.T, fix apiFixture) *httptest.Server {
 	return ts
 }
 
-func newTestPoller(t *testing.T, ts *httptest.Server, ep *mockEventPoller) *Poller {
+func newTestPoller(t *testing.T, ts *httptest.Server, ep *mockEventPoller, connIdx map[string]*config.GithubInfo) *Poller {
 	t.Helper()
 	client := p42.NewClient(ts.URL, p42.WithAPIToken("test-token"))
 	return New(Config{
-		Client:      client,
-		TenantID:    testTenantID,
-		RunnerID:    testRunnerID,
-		EventPoller: ep,
+		Client:        client,
+		TenantID:      testTenantID,
+		RunnerID:      testRunnerID,
+		EventPoller:   ep,
+		ConnectionIdx: connIdx,
 	})
 }
 
@@ -149,7 +159,7 @@ func TestPrivateConnectionTargetingThisRunner(t *testing.T) {
 	fix := defaultFixture()
 	ts := newMockServer(t, fix)
 	ep := newMockEventPoller()
-	poller := newTestPoller(t, ts, ep)
+	poller := newTestPoller(t, ts, ep, fix.connectionIdx)
 	defer shutdownPoller(t, poller)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -161,7 +171,7 @@ func TestPrivateConnectionTargetingThisRunner(t *testing.T) {
 	require.Contains(t, desired, key)
 	require.Equal(t, testToken, desired[key].Token)
 	require.Equal(t, testUserLogin, desired[key].User)
-	require.Equal(t, "", desired[key].BaseURL)
+	require.Equal(t, testGHESURL, desired[key].BaseURL)
 }
 
 func TestConnectionTargetingDifferentRunner(t *testing.T) {
@@ -170,7 +180,7 @@ func TestConnectionTargetingDifferentRunner(t *testing.T) {
 
 	ts := newMockServer(t, fix)
 	ep := newMockEventPoller()
-	poller := newTestPoller(t, ts, ep)
+	poller := newTestPoller(t, ts, ep, fix.connectionIdx)
 	defer shutdownPoller(t, poller)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -187,7 +197,7 @@ func TestNonPrivateConnection(t *testing.T) {
 
 	ts := newMockServer(t, fix)
 	ep := newMockEventPoller()
-	poller := newTestPoller(t, ts, ep)
+	poller := newTestPoller(t, ts, ep, fix.connectionIdx)
 	defer shutdownPoller(t, poller)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -204,7 +214,7 @@ func TestDefaultConnectionIDResolution(t *testing.T) {
 
 	ts := newMockServer(t, fix)
 	ep := newMockEventPoller()
-	poller := newTestPoller(t, ts, ep)
+	poller := newTestPoller(t, ts, ep, fix.connectionIdx)
 	defer shutdownPoller(t, poller)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -222,7 +232,7 @@ func TestNilConnectionIDResolvesToDefault(t *testing.T) {
 
 	ts := newMockServer(t, fix)
 	ep := newMockEventPoller()
-	poller := newTestPoller(t, ts, ep)
+	poller := newTestPoller(t, ts, ep, fix.connectionIdx)
 	defer shutdownPoller(t, poller)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -246,14 +256,12 @@ func TestMultipleOrgsAcrossMultipleEnvironments(t *testing.T) {
 				Private:         true,
 				RunnerID:        util.Pointer(testRunnerID),
 				GithubUserLogin: util.Pointer("user1"),
-				OAuthToken:      util.Pointer("token1"),
 			},
 			{
 				ConnectionID:    testConnID2,
 				Private:         true,
 				RunnerID:        util.Pointer(testRunnerID),
 				GithubUserLogin: util.Pointer("user2"),
-				OAuthToken:      util.Pointer("token2"),
 			},
 		},
 		envs: []p42.Environment{
@@ -268,11 +276,15 @@ func TestMultipleOrgsAcrossMultipleEnvironments(t *testing.T) {
 				Repos:              []string{"org-c/repo-3", "org-a/repo-4"},
 			},
 		},
+		connectionIdx: map[string]*config.GithubInfo{
+			testConnID1: {ConnectionID: testConnID1, Token: "token1", URL: testGHESURL},
+			testConnID2: {ConnectionID: testConnID2, Token: "token2", URL: testGHESURL},
+		},
 	}
 
 	ts := newMockServer(t, fix)
 	ep := newMockEventPoller()
-	poller := newTestPoller(t, ts, ep)
+	poller := newTestPoller(t, ts, ep, fix.connectionIdx)
 	defer shutdownPoller(t, poller)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -294,7 +306,7 @@ func TestEnvironmentWithNoRepos(t *testing.T) {
 
 	ts := newMockServer(t, fix)
 	ep := newMockEventPoller()
-	poller := newTestPoller(t, ts, ep)
+	poller := newTestPoller(t, ts, ep, fix.connectionIdx)
 	defer shutdownPoller(t, poller)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -317,7 +329,6 @@ func TestDeduplicationAcrossEnvironments(t *testing.T) {
 				Private:         true,
 				RunnerID:        util.Pointer(testRunnerID),
 				GithubUserLogin: util.Pointer(testUserLogin),
-				OAuthToken:      util.Pointer(testToken),
 			},
 		},
 		envs: []p42.Environment{
@@ -332,11 +343,14 @@ func TestDeduplicationAcrossEnvironments(t *testing.T) {
 				Repos:              []string{"same-org/repo-b"},
 			},
 		},
+		connectionIdx: map[string]*config.GithubInfo{
+			testConnID1: {ConnectionID: testConnID1, Token: testToken, URL: testGHESURL},
+		},
 	}
 
 	ts := newMockServer(t, fix)
 	ep := newMockEventPoller()
-	poller := newTestPoller(t, ts, ep)
+	poller := newTestPoller(t, ts, ep, fix.connectionIdx)
 	defer shutdownPoller(t, poller)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -353,7 +367,7 @@ func TestGracefulShutdownStopsLoop(t *testing.T) {
 	fix := defaultFixture()
 	ts := newMockServer(t, fix)
 	ep := newMockEventPoller()
-	poller := newTestPoller(t, ts, ep)
+	poller := newTestPoller(t, ts, ep, fix.connectionIdx)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -380,21 +394,18 @@ func TestMixedConnections(t *testing.T) {
 				Private:         true,
 				RunnerID:        util.Pointer(testRunnerID),
 				GithubUserLogin: util.Pointer("user1"),
-				OAuthToken:      util.Pointer("token1"),
 			},
 			{
 				ConnectionID:    testConnID2,
 				Private:         true,
 				RunnerID:        util.Pointer("other-runner"),
 				GithubUserLogin: util.Pointer("user2"),
-				OAuthToken:      util.Pointer("token2"),
 			},
 			{
 				ConnectionID:    testConnID3,
 				Private:         false,
 				RunnerID:        nil,
 				GithubUserLogin: util.Pointer("user3"),
-				OAuthToken:      util.Pointer("token3"),
 			},
 		},
 		envs: []p42.Environment{
@@ -414,11 +425,14 @@ func TestMixedConnections(t *testing.T) {
 				Repos:              []string{"public-org/repo"},
 			},
 		},
+		connectionIdx: map[string]*config.GithubInfo{
+			testConnID1: {ConnectionID: testConnID1, Token: "token1", URL: testGHESURL},
+		},
 	}
 
 	ts := newMockServer(t, fix)
 	ep := newMockEventPoller()
-	poller := newTestPoller(t, ts, ep)
+	poller := newTestPoller(t, ts, ep, fix.connectionIdx)
 	defer shutdownPoller(t, poller)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
