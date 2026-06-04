@@ -107,6 +107,7 @@ func (p *Poller) Close() error {
 func (p *Poller) UpdateTargets(desired map[CheckpointKey]ConnectionInfo) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	slog.InfoContext(p.cg.Context(), "github events poller: UpdateTargets", "n", len(desired))
 
 	p.cancelRemovedTargetsAndStartNewOnes(desired)
 	p.waitForRemovedTargets(desired)
@@ -156,6 +157,9 @@ func (p *Poller) waitForRemovedTargets(desired map[CheckpointKey]ConnectionInfo)
 func (p *Poller) pollTarget(ctx context.Context, key CheckpointKey, info ConnectionInfo, done chan struct{}) {
 	defer p.cg.Done()
 	defer close(done)
+
+	slog.InfoContext(ctx, "starting to poll github org", "org", key.OrgName, "connection", key.GithubConnectionID, "baseURL", info.BaseURL)
+	defer slog.InfoContext(ctx, "done polling github org", "org", key.OrgName, "connection", key.GithubConnectionID, "baseURL", info.BaseURL)
 
 	// Phase jitter: sleep a random duration in [0, 10s] before the first poll.
 	//nolint:gosec // Cryptographic randomness not needed for jitter.

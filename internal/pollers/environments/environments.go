@@ -177,8 +177,8 @@ func getTargetOrgs(
 			if effectiveConnID == "" {
 				continue
 			}
-			_, ok := privateConns[effectiveConnID]
-			if !ok {
+			pconn := privateConns[effectiveConnID]
+			if pconn == nil {
 				continue
 			}
 			localInfo := connectionIdx[effectiveConnID]
@@ -200,7 +200,7 @@ func getTargetOrgs(
 					desired[key] = githubevents.ConnectionInfo{
 						Token:   localInfo.Token,
 						BaseURL: localInfo.URL,
-						User:    util.Deref(privateConns[effectiveConnID].GithubUserLogin),
+						User:    util.Deref(pconn.GithubUserLogin),
 					}
 				}
 			}
