@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/go-github/v81/github"
+	"github.com/plan42-ai/cache"
 	"github.com/plan42-ai/cli/internal/config"
 	"github.com/plan42-ai/cli/internal/pollers/githubevents"
 	"github.com/plan42-ai/cli/internal/util"
@@ -18,7 +20,10 @@ import (
 	"github.com/plan42-ai/sdk-go/p42"
 )
 
-const maxDiscoveryInterval = 60 * time.Second
+const (
+	maxDiscoveryInterval = 60 * time.Second
+	connCacheTTL         = 8 * time.Hour
+)
 
 // EventPoller is the interface the github events poller must implement.
 // Environment discovery calls UpdateTargets on each iteration with the desired
@@ -44,6 +49,7 @@ type Poller struct {
 	eventPoller   EventPoller
 	connectionIdx map[string]*config.GithubInfo
 	cg            *concurrency.ContextGroup
+	connections   *cache.Cache[string, *resolvedConn]
 }
 
 // New creates and starts a new environment discovery Poller. The poller
@@ -56,6 +62,7 @@ func New(cfg Config) *Poller {
 		eventPoller:   cfg.EventPoller,
 		connectionIdx: cfg.ConnectionIdx,
 		cg:            concurrency.NewContextGroup(),
+		connections:   cache.NewCacheWithTTL[string, *resolvedConn](connCacheTTL),
 	}
 	p.cg.Add(1)
 	go p.run()
@@ -65,7 +72,9 @@ func New(cfg Config) *Poller {
 // ShutdownContext cancels the discovery loop and waits for it to finish.
 func (p *Poller) ShutdownContext(ctx context.Context) error {
 	p.cg.Cancel()
-	return p.cg.WaitContext(ctx)
+	err := p.cg.WaitContext(ctx)
+	_ = p.connections.Close()
+	return err
 }
 
 // run is the main discovery loop.
@@ -107,7 +116,7 @@ func (p *Poller) discover(ctx context.Context) {
 		return
 	}
 
-	desired, err := getTargetOrgs(ctx, p.client, p.tenantID, defaultConnID, privateConns, p.connectionIdx)
+	desired, err := p.getTargetOrgs(ctx, defaultConnID, privateConns)
 	if err != nil {
 		slog.ErrorContext(ctx, "environment discovery: ListEnvironments failed", "error", err)
 		return
@@ -155,20 +164,51 @@ func getPrivateConnections(ctx context.Context, client *p42.Client, tenantID, ru
 	}
 }
 
-// getTargetOrgs pages through all environments for a tenant and builds
-// the desired set of unique (GithubConnectionID, OrgName) pairs for
-// environments whose effective connection is in privateConns.
-func getTargetOrgs(
+// resolvedConn holds the GitHub client and authenticated user login for a
+// private connection.
+type resolvedConn struct {
+	ghClient *github.Client
+	user     string
+}
+
+// getConnection returns the resolved connection for connID. It returns the
+// cached entry if one exists; otherwise it builds a new GitHub client,
+// resolves the authenticated user, and caches the result. Returns nil if
+// the connection cannot be resolved.
+func (p *Poller) getConnection(ctx context.Context, connID string, info *config.GithubInfo) *resolvedConn {
+	rc, ok := p.connections.GetCachedValue(connID)
+	if ok {
+		return rc
+	}
+	ghClient, err := githubevents.NewGitHubClient(info.Token, info.URL)
+	if err != nil {
+		slog.ErrorContext(ctx, "environment discovery: failed to create GitHub client for connection; skipping",
+			"connectionID", connID, "error", err)
+		return nil
+	}
+	user, _, err := ghClient.Users.Get(ctx, "")
+	if err != nil {
+		slog.ErrorContext(ctx, "environment discovery: failed to resolve GitHub user for connection; skipping",
+			"connectionID", connID, "error", err)
+		return nil
+	}
+	rc = &resolvedConn{ghClient: ghClient, user: user.GetLogin()}
+	p.connections.AddIfNotPresent(connID, rc)
+	return rc
+}
+
+// getTargetOrgs pages through all environments for the tenant and builds the
+// desired set of unique (GithubConnectionID, OrgName) pairs for environments
+// whose effective connection is a private connection targeting this runner.
+func (p *Poller) getTargetOrgs(
 	ctx context.Context,
-	client *p42.Client,
-	tenantID, defaultConnID string,
+	defaultConnID string,
 	privateConns map[string]*p42.GithubConnection,
-	connectionIdx map[string]*config.GithubInfo,
 ) (map[githubevents.CheckpointKey]githubevents.ConnectionInfo, error) {
 	desired := make(map[githubevents.CheckpointKey]githubevents.ConnectionInfo)
-	req := &p42.ListEnvironmentsRequest{TenantID: tenantID}
+	req := &p42.ListEnvironmentsRequest{TenantID: p.tenantID}
 	for {
-		resp, err := client.ListEnvironments(ctx, req)
+		resp, err := p.client.ListEnvironments(ctx, req)
 		if err != nil {
 			return nil, err
 		}
@@ -177,14 +217,17 @@ func getTargetOrgs(
 			if effectiveConnID == "" {
 				continue
 			}
-			pconn := privateConns[effectiveConnID]
-			if pconn == nil {
+			if privateConns[effectiveConnID] == nil {
 				continue
 			}
-			localInfo := connectionIdx[effectiveConnID]
+			localInfo := p.connectionIdx[effectiveConnID]
 			if localInfo == nil || localInfo.Token == "" {
 				slog.ErrorContext(ctx, "environment discovery: no local credentials for connection; skipping",
 					"connectionID", effectiveConnID)
+				continue
+			}
+			rc := p.getConnection(ctx, effectiveConnID, localInfo)
+			if rc == nil {
 				continue
 			}
 			for _, repo := range env.Repos {
@@ -198,9 +241,10 @@ func getTargetOrgs(
 				}
 				if _, exists := desired[key]; !exists {
 					desired[key] = githubevents.ConnectionInfo{
-						Token:   localInfo.Token,
-						BaseURL: localInfo.URL,
-						User:    util.Deref(pconn.GithubUserLogin),
+						Token:    localInfo.Token,
+						BaseURL:  localInfo.URL,
+						User:     rc.user,
+						GHClient: rc.ghClient,
 					}
 				}
 			}

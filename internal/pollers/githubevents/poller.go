@@ -168,14 +168,8 @@ func (p *Poller) pollTarget(ctx context.Context, key CheckpointKey, info Connect
 		return
 	}
 
-	// Build a go-github client for polling the Events API, and the github client
-	// handlers use to act on the events (both authenticated for this connection).
-	ghClient, err := newEventsClient(info)
-	if err != nil {
-		slog.Error("github events poller: failed to create github client",
-			"connection", key.GithubConnectionID, "org", key.OrgName, "error", err)
-		return
-	}
+	// Build the github-event-handlers client that dispatched events carry for
+	// handlers to act on. The go-github client for polling is provided in info.GHClient.
 	handlerClient, err := newHandlerClient(info)
 	if err != nil {
 		slog.Error("github events poller: failed to create handler client",
@@ -184,7 +178,7 @@ func (p *Poller) pollTarget(ctx context.Context, key CheckpointKey, info Connect
 	}
 
 	for {
-		p.doPoll(ctx, key, info, ghClient, handlerClient)
+		p.doPoll(ctx, key, info, info.GHClient, handlerClient)
 		if ctx.Err() != nil {
 			return
 		}
@@ -398,18 +392,20 @@ func isPublicGitHub(baseURL string) bool {
 	return baseURL == "" || baseURL == "https://api.github.com" || baseURL == "https://github.com"
 }
 
-// newEventsClient builds a go-github client for polling the Events API.
-func newEventsClient(info ConnectionInfo) (*github.Client, error) {
+// NewGitHubClient builds a go-github client authenticated with the given token
+// and targeting the given base URL. For public GitHub (or empty URL) it targets
+// https://api.github.com; otherwise it configures enterprise URLs.
+func NewGitHubClient(token, baseURL string) (*github.Client, error) {
 	httpClient := &http.Client{
 		Transport: &tokenTransport{
-			token:   info.Token,
+			token:   token,
 			wrapped: http.DefaultTransport,
 		},
 	}
 	gh := github.NewClient(httpClient)
-	if !isPublicGitHub(info.BaseURL) {
+	if !isPublicGitHub(baseURL) {
 		var err error
-		gh, err = gh.WithEnterpriseURLs(info.BaseURL, info.BaseURL)
+		gh, err = gh.WithEnterpriseURLs(baseURL, baseURL)
 		if err != nil {
 			return nil, err
 		}

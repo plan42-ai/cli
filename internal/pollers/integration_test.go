@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -49,10 +50,9 @@ func defaultFixture() apiFixture {
 		},
 		connections: []*p42.GithubConnection{
 			{
-				ConnectionID:    testConnID,
-				Private:         true,
-				RunnerID:        util.Pointer(testRunnerID),
-				GithubUserLogin: util.Pointer(testUserLogin),
+				ConnectionID: testConnID,
+				Private:      true,
+				RunnerID:     util.Pointer(testRunnerID),
 			},
 		},
 		envs: []p42.Environment{
@@ -65,12 +65,12 @@ func defaultFixture() apiFixture {
 	}
 }
 
-func defaultConnectionIdx() map[string]*config.GithubInfo {
+func defaultConnectionIdx(ghURL string) map[string]*config.GithubInfo {
 	return map[string]*config.GithubInfo{
 		testConnID: {
 			ConnectionID: testConnID,
 			Token:        testToken,
-			URL:          "",
+			URL:          ghURL,
 		},
 	}
 }
@@ -99,7 +99,28 @@ func newPlan42Server(t *testing.T, fix apiFixture) *httptest.Server {
 	return ts
 }
 
-// --- GitHub Events API mock ---
+// --- GitHub API mocks ---
+
+// newMockGitHubUserServer creates a mock GitHub API server that serves
+// /api/v3/user, mapping token to login via the Authorization header.
+func newMockGitHubUserServer(t *testing.T, tokenToUser map[string]string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v3/user", func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		token := strings.TrimPrefix(auth, "token ")
+		login, ok := tokenToUser[token]
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"login": login})
+	})
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+	return ts
+}
 
 // githubEventsHandler returns an http.Handler that serves a canned Events API
 // page. requestCount is incremented on each request.
@@ -138,6 +159,7 @@ func newCheckpointStore(t *testing.T) *githubevents.CheckpointStore {
 // polling goroutines for them.
 func TestDiscoveryReconcilePoll(t *testing.T) {
 	fix := defaultFixture()
+	ghUserServer := newMockGitHubUserServer(t, map[string]string{testToken: testUserLogin})
 	p42Server := newPlan42Server(t, fix)
 	client := p42.NewClient(p42Server.URL, p42.WithAPIToken("test-token"))
 
@@ -149,7 +171,7 @@ func TestDiscoveryReconcilePoll(t *testing.T) {
 		TenantID:      testTenantID,
 		RunnerID:      testRunnerID,
 		EventPoller:   poller,
-		ConnectionIdx: defaultConnectionIdx(),
+		ConnectionIdx: defaultConnectionIdx(ghUserServer.URL),
 	})
 
 	// Wait for at least one reconcile cycle.
@@ -221,11 +243,14 @@ func TestEventFlowEndToEnd(t *testing.T) {
 
 	// Directly call UpdateTargets (instead of going through env discovery)
 	// so we control the BaseURL pointed at our mock GitHub server.
+	ghClient, err := githubevents.NewGitHubClient(testToken, ghServer.URL)
+	require.NoError(t, err)
 	poller.UpdateTargets(map[githubevents.CheckpointKey]githubevents.ConnectionInfo{
 		key: {
-			Token:   testToken,
-			User:    testUserLogin,
-			BaseURL: ghServer.URL,
+			Token:    testToken,
+			User:     testUserLogin,
+			BaseURL:  ghServer.URL,
+			GHClient: ghClient,
 		},
 	})
 
@@ -236,9 +261,11 @@ func TestEventFlowEndToEnd(t *testing.T) {
 		return len(handledTypes) >= 2
 	}, 15*time.Second, 100*time.Millisecond, "expected at least 2 events to be handled")
 
-	mu.Lock()
-	types := append([]string{}, handledTypes...)
-	mu.Unlock()
+	types := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string{}, handledTypes...)
+	}()
 
 	require.Contains(t, types, "issue_comment")
 	require.Contains(t, types, "pull_request")
@@ -303,6 +330,7 @@ func TestGracefulShutdownNoLeaks(t *testing.T) {
 	defer ghServer.Close()
 
 	fix := defaultFixture()
+	ghUserServer := newMockGitHubUserServer(t, map[string]string{testToken: testUserLogin})
 	p42Server := newPlan42Server(t, fix)
 	client := p42.NewClient(p42Server.URL, p42.WithAPIToken("test-token"))
 
@@ -338,7 +366,7 @@ func TestGracefulShutdownNoLeaks(t *testing.T) {
 		TenantID:      testTenantID,
 		RunnerID:      testRunnerID,
 		EventPoller:   poller,
-		ConnectionIdx: defaultConnectionIdx(),
+		ConnectionIdx: defaultConnectionIdx(ghUserServer.URL),
 	})
 
 	// Wait for at least one target to appear and one poll to happen.
@@ -385,10 +413,9 @@ func TestEndToEndWithMultipleOrgs(t *testing.T) {
 		},
 		connections: []*p42.GithubConnection{
 			{
-				ConnectionID:    testConnID,
-				Private:         true,
-				RunnerID:        util.Pointer(testRunnerID),
-				GithubUserLogin: util.Pointer(testUserLogin),
+				ConnectionID: testConnID,
+				Private:      true,
+				RunnerID:     util.Pointer(testRunnerID),
 			},
 		},
 		envs: []p42.Environment{
@@ -406,12 +433,13 @@ func TestEndToEndWithMultipleOrgs(t *testing.T) {
 	store := newCheckpointStore(t)
 	poller := githubevents.NewPoller(githubevents.Config{Checkpoints: store})
 
+	ghUserServer := newMockGitHubUserServer(t, map[string]string{testToken: testUserLogin})
 	envPoller := environments.New(environments.Config{
 		Client:        client,
 		TenantID:      testTenantID,
 		RunnerID:      testRunnerID,
 		EventPoller:   poller,
-		ConnectionIdx: defaultConnectionIdx(),
+		ConnectionIdx: defaultConnectionIdx(ghUserServer.URL),
 	})
 
 	// Wait for both targets to appear.
