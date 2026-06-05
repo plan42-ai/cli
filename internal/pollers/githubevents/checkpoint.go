@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/go-github/v81/github"
 	"github.com/google/renameio/v2"
 	"github.com/plan42-ai/clock"
 	"github.com/plan42-ai/concurrency"
@@ -31,9 +32,10 @@ type CheckpointKey struct {
 // ConnectionInfo carries the connection details needed to construct a
 // GitHub client for polling a (GithubConnectionID, OrgName) pair.
 type ConnectionInfo struct {
-	Token   string
-	BaseURL string
-	User    string
+	Token    string
+	BaseURL  string
+	User     string
+	GHClient *github.Client
 }
 
 // Checkpoint holds the durable state for a single polling pair. The JSON tags

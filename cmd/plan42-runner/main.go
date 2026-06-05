@@ -33,7 +33,7 @@ func main() {
 		slog.Error("error processing options", "error", err)
 		panic(util.ExitCode(1))
 	}
-	tokenID, runnerID, err := extractParamsFromToken(options.Config.Runner.RunnerToken)
+	tenantID, runnerID, err := extractParamsFromToken(options.Config.Runner.RunnerToken)
 	if err != nil {
 		slog.Error("error extracting params from token", "error", err)
 		panic(util.ExitCode(2))
@@ -60,6 +60,7 @@ func main() {
 		Plan42Client:      options.Client,
 		CommentTriggerStr: "/Plan42",
 		UIURL:             options.Config.Runner.URL,
+		TenantID:          &tenantID,
 	})
 
 	// 4. Dispatcher: consumes the poller's event channel via a worker pool.
@@ -70,13 +71,13 @@ func main() {
 	// periodically querying the Plan42 API. Starts its loop immediately.
 	envPoller := environments.New(environments.Config{
 		Client:        options.Client,
-		TenantID:      tokenID,
+		TenantID:      tenantID,
 		RunnerID:      runnerID,
 		EventPoller:   poller,
 		ConnectionIdx: options.ConnectionIdx,
 	})
 
-	msgPoller := messages.New(options.Client, tokenID, runnerID, options.PollerOptions()...)
+	msgPoller := messages.New(options.Client, tenantID, runnerID, options.PollerOptions()...)
 	defer util.Close(msgPoller)
 
 	sigCh := make(chan os.Signal, 1)
@@ -125,7 +126,7 @@ func main() {
 	}
 }
 
-func extractParamsFromToken(token string) (tokenID string, runnerID string, err error) {
+func extractParamsFromToken(token string) (tenantID string, runnerID string, err error) {
 	s := strings.SplitN(token, "_", 2)
 	if len(s) != 2 {
 		return "", "", errors.New("invalid api token")

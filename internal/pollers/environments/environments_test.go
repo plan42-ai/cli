@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/plan42-ai/cache"
 	"github.com/plan42-ai/cli/internal/config"
 	"github.com/plan42-ai/cli/internal/pollers/githubevents"
 	"github.com/plan42-ai/cli/internal/util"
@@ -29,8 +31,30 @@ const (
 	testEnvID3     = "env-3"
 	testOrgName    = "my-org"
 	testDefaultCID = "default-conn"
-	testGHESURL    = "https://ghes.example.com"
 )
+
+// newMockGitHubServer creates a mock GitHub API server that resolves token to
+// username via the /api/v3/user endpoint. tokenToUser maps "token <value>" to
+// the login to return. The returned server URL can be used as the GithubInfo.URL
+// for enterprise-style connections.
+func newMockGitHubServer(t *testing.T, tokenToUser map[string]string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v3/user", func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		token := strings.TrimPrefix(auth, "token ")
+		login, ok := tokenToUser[token]
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"login": login})
+	})
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+	return ts
+}
 
 // mockEventPoller records calls to UpdateTargets.
 type mockEventPoller struct {
@@ -81,7 +105,7 @@ type apiFixture struct {
 	connectionIdx map[string]*config.GithubInfo
 }
 
-func defaultFixture() apiFixture {
+func defaultFixture(ghURL string) apiFixture {
 	return apiFixture{
 		tenant: &p42.Tenant{
 			TenantID:                  testTenantID,
@@ -89,10 +113,9 @@ func defaultFixture() apiFixture {
 		},
 		connections: []*p42.GithubConnection{
 			{
-				ConnectionID:    testConnID1,
-				Private:         true,
-				RunnerID:        util.Pointer(testRunnerID),
-				GithubUserLogin: util.Pointer(testUserLogin),
+				ConnectionID: testConnID1,
+				Private:      true,
+				RunnerID:     util.Pointer(testRunnerID),
 			},
 		},
 		envs: []p42.Environment{
@@ -106,7 +129,7 @@ func defaultFixture() apiFixture {
 			testConnID1: {
 				ConnectionID: testConnID1,
 				Token:        testToken,
-				URL:          testGHESURL,
+				URL:          ghURL,
 			},
 		},
 	}
@@ -156,7 +179,8 @@ func shutdownPoller(t *testing.T, poller *Poller) {
 }
 
 func TestPrivateConnectionTargetingThisRunner(t *testing.T) {
-	fix := defaultFixture()
+	ghServer := newMockGitHubServer(t, map[string]string{testToken: testUserLogin})
+	fix := defaultFixture(ghServer.URL)
 	ts := newMockServer(t, fix)
 	ep := newMockEventPoller()
 	poller := newTestPoller(t, ts, ep, fix.connectionIdx)
@@ -171,11 +195,12 @@ func TestPrivateConnectionTargetingThisRunner(t *testing.T) {
 	require.Contains(t, desired, key)
 	require.Equal(t, testToken, desired[key].Token)
 	require.Equal(t, testUserLogin, desired[key].User)
-	require.Equal(t, testGHESURL, desired[key].BaseURL)
+	require.Equal(t, ghServer.URL, desired[key].BaseURL)
 }
 
 func TestConnectionTargetingDifferentRunner(t *testing.T) {
-	fix := defaultFixture()
+	ghServer := newMockGitHubServer(t, map[string]string{testToken: testUserLogin})
+	fix := defaultFixture(ghServer.URL)
 	fix.connections[0].RunnerID = util.Pointer("other-runner")
 
 	ts := newMockServer(t, fix)
@@ -192,7 +217,8 @@ func TestConnectionTargetingDifferentRunner(t *testing.T) {
 }
 
 func TestNonPrivateConnection(t *testing.T) {
-	fix := defaultFixture()
+	ghServer := newMockGitHubServer(t, map[string]string{testToken: testUserLogin})
+	fix := defaultFixture(ghServer.URL)
 	fix.connections[0].Private = false
 
 	ts := newMockServer(t, fix)
@@ -209,7 +235,8 @@ func TestNonPrivateConnection(t *testing.T) {
 }
 
 func TestDefaultConnectionIDResolution(t *testing.T) {
-	fix := defaultFixture()
+	ghServer := newMockGitHubServer(t, map[string]string{testToken: testUserLogin})
+	fix := defaultFixture(ghServer.URL)
 	fix.envs[0].GithubConnectionID = util.Pointer("default")
 
 	ts := newMockServer(t, fix)
@@ -227,7 +254,8 @@ func TestDefaultConnectionIDResolution(t *testing.T) {
 }
 
 func TestNilConnectionIDResolvesToDefault(t *testing.T) {
-	fix := defaultFixture()
+	ghServer := newMockGitHubServer(t, map[string]string{testToken: testUserLogin})
+	fix := defaultFixture(ghServer.URL)
 	fix.envs[0].GithubConnectionID = nil
 
 	ts := newMockServer(t, fix)
@@ -245,6 +273,7 @@ func TestNilConnectionIDResolvesToDefault(t *testing.T) {
 }
 
 func TestMultipleOrgsAcrossMultipleEnvironments(t *testing.T) {
+	ghServer := newMockGitHubServer(t, map[string]string{"token1": "user1", "token2": "user2"})
 	fix := apiFixture{
 		tenant: &p42.Tenant{
 			TenantID:                  testTenantID,
@@ -252,16 +281,14 @@ func TestMultipleOrgsAcrossMultipleEnvironments(t *testing.T) {
 		},
 		connections: []*p42.GithubConnection{
 			{
-				ConnectionID:    testConnID1,
-				Private:         true,
-				RunnerID:        util.Pointer(testRunnerID),
-				GithubUserLogin: util.Pointer("user1"),
+				ConnectionID: testConnID1,
+				Private:      true,
+				RunnerID:     util.Pointer(testRunnerID),
 			},
 			{
-				ConnectionID:    testConnID2,
-				Private:         true,
-				RunnerID:        util.Pointer(testRunnerID),
-				GithubUserLogin: util.Pointer("user2"),
+				ConnectionID: testConnID2,
+				Private:      true,
+				RunnerID:     util.Pointer(testRunnerID),
 			},
 		},
 		envs: []p42.Environment{
@@ -277,8 +304,8 @@ func TestMultipleOrgsAcrossMultipleEnvironments(t *testing.T) {
 			},
 		},
 		connectionIdx: map[string]*config.GithubInfo{
-			testConnID1: {ConnectionID: testConnID1, Token: "token1", URL: testGHESURL},
-			testConnID2: {ConnectionID: testConnID2, Token: "token2", URL: testGHESURL},
+			testConnID1: {ConnectionID: testConnID1, Token: "token1", URL: ghServer.URL},
+			testConnID2: {ConnectionID: testConnID2, Token: "token2", URL: ghServer.URL},
 		},
 	}
 
@@ -301,7 +328,8 @@ func TestMultipleOrgsAcrossMultipleEnvironments(t *testing.T) {
 }
 
 func TestEnvironmentWithNoRepos(t *testing.T) {
-	fix := defaultFixture()
+	ghServer := newMockGitHubServer(t, map[string]string{testToken: testUserLogin})
+	fix := defaultFixture(ghServer.URL)
 	fix.envs[0].Repos = nil
 
 	ts := newMockServer(t, fix)
@@ -318,6 +346,7 @@ func TestEnvironmentWithNoRepos(t *testing.T) {
 }
 
 func TestDeduplicationAcrossEnvironments(t *testing.T) {
+	ghServer := newMockGitHubServer(t, map[string]string{testToken: testUserLogin})
 	fix := apiFixture{
 		tenant: &p42.Tenant{
 			TenantID:                  testTenantID,
@@ -325,10 +354,9 @@ func TestDeduplicationAcrossEnvironments(t *testing.T) {
 		},
 		connections: []*p42.GithubConnection{
 			{
-				ConnectionID:    testConnID1,
-				Private:         true,
-				RunnerID:        util.Pointer(testRunnerID),
-				GithubUserLogin: util.Pointer(testUserLogin),
+				ConnectionID: testConnID1,
+				Private:      true,
+				RunnerID:     util.Pointer(testRunnerID),
 			},
 		},
 		envs: []p42.Environment{
@@ -344,7 +372,7 @@ func TestDeduplicationAcrossEnvironments(t *testing.T) {
 			},
 		},
 		connectionIdx: map[string]*config.GithubInfo{
-			testConnID1: {ConnectionID: testConnID1, Token: testToken, URL: testGHESURL},
+			testConnID1: {ConnectionID: testConnID1, Token: testToken, URL: ghServer.URL},
 		},
 	}
 
@@ -364,7 +392,8 @@ func TestDeduplicationAcrossEnvironments(t *testing.T) {
 }
 
 func TestGracefulShutdownStopsLoop(t *testing.T) {
-	fix := defaultFixture()
+	ghServer := newMockGitHubServer(t, map[string]string{testToken: testUserLogin})
+	fix := defaultFixture(ghServer.URL)
 	ts := newMockServer(t, fix)
 	ep := newMockEventPoller()
 	poller := newTestPoller(t, ts, ep, fix.connectionIdx)
@@ -383,6 +412,7 @@ func TestGracefulShutdownStopsLoop(t *testing.T) {
 }
 
 func TestMixedConnections(t *testing.T) {
+	ghServer := newMockGitHubServer(t, map[string]string{"token1": "user1"})
 	fix := apiFixture{
 		tenant: &p42.Tenant{
 			TenantID:                  testTenantID,
@@ -390,22 +420,19 @@ func TestMixedConnections(t *testing.T) {
 		},
 		connections: []*p42.GithubConnection{
 			{
-				ConnectionID:    testConnID1,
-				Private:         true,
-				RunnerID:        util.Pointer(testRunnerID),
-				GithubUserLogin: util.Pointer("user1"),
+				ConnectionID: testConnID1,
+				Private:      true,
+				RunnerID:     util.Pointer(testRunnerID),
 			},
 			{
-				ConnectionID:    testConnID2,
-				Private:         true,
-				RunnerID:        util.Pointer("other-runner"),
-				GithubUserLogin: util.Pointer("user2"),
+				ConnectionID: testConnID2,
+				Private:      true,
+				RunnerID:     util.Pointer("other-runner"),
 			},
 			{
-				ConnectionID:    testConnID3,
-				Private:         false,
-				RunnerID:        nil,
-				GithubUserLogin: util.Pointer("user3"),
+				ConnectionID: testConnID3,
+				Private:      false,
+				RunnerID:     nil,
 			},
 		},
 		envs: []p42.Environment{
@@ -426,7 +453,7 @@ func TestMixedConnections(t *testing.T) {
 			},
 		},
 		connectionIdx: map[string]*config.GithubInfo{
-			testConnID1: {ConnectionID: testConnID1, Token: "token1", URL: testGHESURL},
+			testConnID1: {ConnectionID: testConnID1, Token: "token1", URL: ghServer.URL},
 		},
 	}
 
@@ -488,4 +515,110 @@ func TestExtractOrg(t *testing.T) {
 			require.Equal(t, tt.want, extractOrg(tt.input))
 		})
 	}
+}
+
+func TestUserResolutionFailureSkipsNewConnection(t *testing.T) {
+	// When a brand-new connection's /user lookup fails and there is no
+	// cached value, that connection is skipped but the discovery cycle
+	// still completes (with an empty desired map for that connection).
+	ghServer := newMockGitHubServer(t, map[string]string{}) // no valid tokens
+	fix := defaultFixture(ghServer.URL)
+	ts := newMockServer(t, fix)
+	ep := newMockEventPoller()
+	poller := newTestPoller(t, ts, ep, fix.connectionIdx)
+	defer shutdownPoller(t, poller)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.True(t, ep.waitForCall(ctx), "expected UpdateTargets to be called")
+
+	desired := ep.lastCall()
+	require.Empty(t, desired, "failing connection with no cache should produce no targets")
+}
+
+func TestUserResolutionFailureUsesCachedValue(t *testing.T) {
+	// Calls getTargetOrgs directly to test the caching fallback behavior
+	// without going through the full Poller lifecycle (avoids jitter delays).
+	//
+	// Phase 1: both connections resolve successfully.
+	// Phase 2: conn-1's token is removed so /user returns 401; the cached
+	//          value from phase 1 should be used. conn-2 still succeeds.
+
+	tokenToUser := map[string]string{"token1": "user1", "token2": "user2"}
+	ghMux := http.NewServeMux()
+	var mu sync.Mutex
+	ghMux.HandleFunc("GET /api/v3/user", func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		token := strings.TrimPrefix(auth, "token ")
+		login, ok := func() (string, bool) {
+			mu.Lock()
+			defer mu.Unlock()
+			v, found := tokenToUser[token]
+			return v, found
+		}()
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"login": login})
+	})
+	ghServer := httptest.NewServer(ghMux)
+	t.Cleanup(ghServer.Close)
+
+	connIdx := map[string]*config.GithubInfo{
+		testConnID1: {ConnectionID: testConnID1, Token: "token1", URL: ghServer.URL},
+		testConnID2: {ConnectionID: testConnID2, Token: "token2", URL: ghServer.URL},
+	}
+
+	privateConns := map[string]*p42.GithubConnection{
+		testConnID1: {ConnectionID: testConnID1, Private: true, RunnerID: util.Pointer(testRunnerID)},
+		testConnID2: {ConnectionID: testConnID2, Private: true, RunnerID: util.Pointer(testRunnerID)},
+	}
+
+	// Mock Plan42 API for ListEnvironments.
+	p42Mux := http.NewServeMux()
+	envs := []p42.Environment{
+		{EnvironmentID: testEnvID1, GithubConnectionID: util.Pointer(testConnID1), Repos: []string{"org-a/repo"}},
+		{EnvironmentID: testEnvID2, GithubConnectionID: util.Pointer(testConnID2), Repos: []string{"org-b/repo"}},
+	}
+	p42Mux.HandleFunc("GET /v1/tenants/"+testTenantID+"/environments", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(p42.List[p42.Environment]{Items: envs})
+	})
+	p42Server := httptest.NewServer(p42Mux)
+	t.Cleanup(p42Server.Close)
+	p42Client := p42.NewClient(p42Server.URL, p42.WithAPIToken("test-token"))
+
+	poller := &Poller{
+		client:        p42Client,
+		tenantID:      testTenantID,
+		connectionIdx: connIdx,
+		connections:   cache.NewCacheWithTTL[string, *resolvedConn](connCacheTTL),
+	}
+	t.Cleanup(func() { _ = poller.connections.Close() })
+	ctx := context.Background()
+
+	// Phase 1: both connections succeed.
+	desired, err := poller.getTargetOrgs(ctx, testConnID1, privateConns)
+	require.NoError(t, err)
+	require.Len(t, desired, 2)
+	require.Contains(t, desired, githubevents.CheckpointKey{GithubConnectionID: testConnID1, OrgName: "org-a"})
+	require.Contains(t, desired, githubevents.CheckpointKey{GithubConnectionID: testConnID2, OrgName: "org-b"})
+	require.Equal(t, "user1", desired[githubevents.CheckpointKey{GithubConnectionID: testConnID1, OrgName: "org-a"}].User)
+
+	// Phase 2: break conn-1.
+	func() {
+		mu.Lock()
+		defer mu.Unlock()
+		delete(tokenToUser, "token1")
+	}()
+
+	desired, err = poller.getTargetOrgs(ctx, testConnID1, privateConns)
+	require.NoError(t, err)
+	require.Len(t, desired, 2, "conn-1 should fall back to cached value")
+	require.Contains(t, desired, githubevents.CheckpointKey{GithubConnectionID: testConnID1, OrgName: "org-a"})
+	require.Contains(t, desired, githubevents.CheckpointKey{GithubConnectionID: testConnID2, OrgName: "org-b"})
+	require.Equal(t, "user1", desired[githubevents.CheckpointKey{GithubConnectionID: testConnID1, OrgName: "org-a"}].User,
+		"cached user login should be preserved")
 }

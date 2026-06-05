@@ -51,9 +51,10 @@ func TestUpdateTargetsStartsGoroutinesForNewPairs(t *testing.T) {
 	key1 := CheckpointKey{GithubConnectionID: "c1", OrgName: testOrg1}
 	key2 := CheckpointKey{GithubConnectionID: "c2", OrgName: testOrg2}
 
+	info := stubConnectionInfo(t)
 	p.UpdateTargets(map[CheckpointKey]ConnectionInfo{
-		key1: {Token: "t1", User: "u1"},
-		key2: {Token: "t2", User: "u2"},
+		key1: info,
+		key2: info,
 	})
 
 	keys := p.TargetKeys()
@@ -69,16 +70,17 @@ func TestUpdateTargetsStopsGoroutinesForRemovedPairs(t *testing.T) {
 	key1 := CheckpointKey{GithubConnectionID: "c1", OrgName: testOrg1}
 	key2 := CheckpointKey{GithubConnectionID: "c2", OrgName: testOrg2}
 
+	info := stubConnectionInfo(t)
 	p.UpdateTargets(map[CheckpointKey]ConnectionInfo{
-		key1: {Token: "t1", User: "u1"},
-		key2: {Token: "t2", User: "u2"},
+		key1: info,
+		key2: info,
 	})
 
 	require.Len(t, p.TargetKeys(), 2)
 
 	// Remove key2.
 	p.UpdateTargets(map[CheckpointKey]ConnectionInfo{
-		key1: {Token: "t1", User: "u1"},
+		key1: info,
 	})
 
 	keys := p.TargetKeys()
@@ -96,7 +98,7 @@ func TestUpdateTargetsDeletesCheckpointForRemovedPair(t *testing.T) {
 	store.Set(key, Checkpoint{LastEventID: "42"})
 
 	p.UpdateTargets(map[CheckpointKey]ConnectionInfo{
-		key: {Token: "t1", User: "u1"},
+		key: stubConnectionInfo(t),
 	})
 
 	// Remove the pair. UpdateTargets waits for the goroutine to exit and deletes
@@ -114,7 +116,7 @@ func TestNoGoroutineLeaksAfterUpdateTargetsRemovesPair(t *testing.T) {
 	key := CheckpointKey{GithubConnectionID: "c1", OrgName: testOrg1}
 
 	p.UpdateTargets(map[CheckpointKey]ConnectionInfo{
-		key: {Token: "t1", User: "u1"},
+		key: stubConnectionInfo(t),
 	})
 
 	// Remove the pair.
@@ -237,8 +239,10 @@ func TestPhasingJitterAppliedBeforeFirstPoll(t *testing.T) {
 	start := time.Now()
 
 	key := CheckpointKey{GithubConnectionID: "c1", OrgName: testOrg1}
+	ghClient, err := NewGitHubClient("test-token", ts.URL)
+	require.NoError(t, err)
 	p.UpdateTargets(map[CheckpointKey]ConnectionInfo{
-		key: {Token: "test-token", User: "testuser", BaseURL: ts.URL},
+		key: {Token: "test-token", User: "testuser", BaseURL: ts.URL, GHClient: ghClient},
 	})
 
 	// Wait a bit for the phasing jitter (up to 10s) and first request.
@@ -261,7 +265,7 @@ func TestUpdateTargetsDoesNotBlockOnCancel(t *testing.T) {
 	key := CheckpointKey{GithubConnectionID: "c1", OrgName: testOrg1}
 
 	p.UpdateTargets(map[CheckpointKey]ConnectionInfo{
-		key: {Token: "t1", User: "u1"},
+		key: stubConnectionInfo(t),
 	})
 
 	done := make(chan struct{})
@@ -338,6 +342,23 @@ func newTestPoller(t *testing.T, store *CheckpointStore) *Poller {
 	return p
 }
 
+// stubConnectionInfo returns a ConnectionInfo backed by a test HTTP server
+// that returns an empty events list. This ensures polling goroutines started
+// by UpdateTargets won't crash if they reach doPoll before the context is
+// cancelled.
+func stubConnectionInfo(t *testing.T) ConnectionInfo {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Poll-Interval", "60")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("[]"))
+	}))
+	t.Cleanup(ts.Close)
+	ghClient, err := NewGitHubClient("stub-token", ts.URL)
+	require.NoError(t, err)
+	return ConnectionInfo{Token: "stub-token", User: "stub-user", BaseURL: ts.URL, GHClient: ghClient}
+}
+
 func TestSelectNewEventsStopsAtCheckpoint(t *testing.T) {
 	events := []*github.Event{
 		{ID: github.Ptr("5")},
@@ -404,8 +425,9 @@ func TestFirstPollEstablishesBaselineWithoutProcessing(t *testing.T) {
 	p := NewPoller(Config{Checkpoints: store, EventCapacity: 10})
 
 	info := ConnectionInfo{Token: "t", User: "u", BaseURL: ts.URL}
-	ghClient, err := newEventsClient(info)
+	ghClient, err := NewGitHubClient(info.Token, info.BaseURL)
 	require.NoError(t, err)
+	info.GHClient = ghClient
 	handlerClient, err := newHandlerClient(info)
 	require.NoError(t, err)
 	key := CheckpointKey{GithubConnectionID: "c1", OrgName: testOrg1}
@@ -431,8 +453,9 @@ func TestSubsequentPollProcessesOnlyNewEvents(t *testing.T) {
 	p := NewPoller(Config{Checkpoints: store, EventCapacity: 10})
 
 	info := ConnectionInfo{Token: "t", User: "u", BaseURL: ts.URL}
-	ghClient, err := newEventsClient(info)
+	ghClient, err := NewGitHubClient(info.Token, info.BaseURL)
 	require.NoError(t, err)
+	info.GHClient = ghClient
 	handlerClient, err := newHandlerClient(info)
 	require.NoError(t, err)
 	key := CheckpointKey{GithubConnectionID: "c1", OrgName: testOrg1}
