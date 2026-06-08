@@ -18,7 +18,7 @@ require (
 	github.com/plan42-ai/clock v1.1.4
 	github.com/plan42-ai/concurrency v1.0.4
 	github.com/plan42-ai/ecies v1.0.3
-	github.com/plan42-ai/github-event-handlers v1.0.24
+	github.com/plan42-ai/github-event-handlers v1.0.25
 	github.com/plan42-ai/log v1.0.3
 	github.com/plan42-ai/openid v1.0.3
 	github.com/plan42-ai/sdk-go v1.0.115
