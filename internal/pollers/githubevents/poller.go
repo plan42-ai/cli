@@ -287,7 +287,7 @@ func newestEventID(events []*github.Event, fallback string) string {
 // advance the checkpoint.
 func (p *Poller) dispatch(ctx context.Context, selected []*github.Event, handlerClient *ghapi.Client) bool {
 	for i := len(selected) - 1; i >= 0; i-- {
-		evt, err := handlers.ParseEventsAPI(selected[i])
+		evt, err := handlers.ParseEventsAPI(ctx, selected[i], handlerClient)
 		if err != nil {
 			slog.Error("github events poller: failed to parse payload",
 				"eventID", selected[i].GetID(), "type", selected[i].GetType(), "error", err)
