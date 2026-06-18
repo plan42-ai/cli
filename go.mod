@@ -21,11 +21,13 @@ require (
 	github.com/plan42-ai/github-event-handlers v1.0.25
 	github.com/plan42-ai/log v1.0.3
 	github.com/plan42-ai/openid v1.0.3
-	github.com/plan42-ai/sdk-go v1.0.115
+	github.com/plan42-ai/sdk-go v1.0.138
 	github.com/plan42-ai/xml v1.25.5-2
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/oauth2 v0.36.0
 )
+
+replace github.com/plan42-ai/sdk-go => ../sdk-go
 
 require (
 	github.com/atotto/clipboard v0.1.4 // indirect

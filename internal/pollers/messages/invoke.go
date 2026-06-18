@@ -10,3 +10,13 @@ type pollerInvokeAgentRequest struct {
 	messages.InvokeAgentRequest
 	client *p42.Client
 }
+
+func (req *pollerInvokeAgentRequest) shouldFetchPRFeedback() bool {
+	if req == nil || req.Turn == nil {
+		return false
+	}
+	if req.FeedBack != nil || req.PrivateGithubConnectionID == nil || req.SubAgent != nil {
+		return false
+	}
+	return req.Turn.TurnIndex > 1
+}
