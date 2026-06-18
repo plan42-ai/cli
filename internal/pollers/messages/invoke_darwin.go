@@ -186,13 +186,6 @@ func (req *pollerInvokeAgentRequest) runContainer(ctx context.Context, container
 	}
 }
 
-func (req *pollerInvokeAgentRequest) shouldFetchPRFeedback() bool {
-	if req.FeedBack != nil || req.PrivateGithubConnectionID == nil {
-		return false
-	}
-	return req.Turn.TurnIndex > 1
-}
-
 func (req *pollerInvokeAgentRequest) updateTurnStatus(ctx context.Context, status string) error {
 	updated, err := req.client.UpdateTurn(
 		ctx,
@@ -221,7 +214,7 @@ func (req *pollerInvokeAgentRequest) validateDockerImage() error {
 }
 
 func (req *pollerInvokeAgentRequest) fetchPRFeedbackIfNeeded(ctx context.Context) error {
-	if req.FeedBack != nil || req.PrivateGithubConnectionID == nil {
+	if req.FeedBack != nil || req.PrivateGithubConnectionID == nil || req.SubAgent != nil {
 		return nil
 	}
 

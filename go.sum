@@ -81,16 +81,12 @@ github.com/plan42-ai/concurrency v1.0.4 h1:snHWAc6rfYVAstdDR/+QocxmOdf9A+lA/S+nG
 github.com/plan42-ai/concurrency v1.0.4/go.mod h1:u5LP6bVGRMyUThh6z1EKulBPSexjB3hwgPVWxmHTPD4=
 github.com/plan42-ai/ecies v1.0.3 h1:0EycKX4d4Ol0Y+s6chGaFJuPFvLEXBUwXfEiwImXY6U=
 github.com/plan42-ai/ecies v1.0.3/go.mod h1:o/f87i4/4Ca+KLbqJB/rsbbC85NnhP+sgVN7sbKfwNE=
-github.com/plan42-ai/github-event-handlers v1.0.24 h1:3Z/V3KjQdeUHkxHGXqIDg+RArmFajOjIVTxJ7bVQnTo=
-github.com/plan42-ai/github-event-handlers v1.0.24/go.mod h1:XCsELb8HUviMW65Hwa4jeHp0IYzqJsOYGJlxCrz01og=
 github.com/plan42-ai/github-event-handlers v1.0.25 h1:77+ppzphITa+Ytms1I2t9Gjbdu3N7d1rgvUeCmcNqyQ=
 github.com/plan42-ai/github-event-handlers v1.0.25/go.mod h1:XCsELb8HUviMW65Hwa4jeHp0IYzqJsOYGJlxCrz01og=
 github.com/plan42-ai/log v1.0.3 h1:S6VD4eaoEJVYVzh2wHcXiWhGKxt1ChCHBRiR5VBRP+U=
 github.com/plan42-ai/log v1.0.3/go.mod h1:RYP+y3ot7ed9XMgbOXy5MX1xpstjoSiIDnp02b+58Lg=
 github.com/plan42-ai/openid v1.0.3 h1:6oX6qBO66O0CG5tPvJ5XCMlN145BYZMbQRiqjb0TY3c=
 github.com/plan42-ai/openid v1.0.3/go.mod h1:ktbyPnO2KweuE/oABJU1QsmyvNQCvQf9HdsFd/zIEzI=
-github.com/plan42-ai/sdk-go v1.0.115 h1:61LLCIT9MNq6iAoxh7STNBxiOF4CwZV6gy0yZxehJH4=
-github.com/plan42-ai/sdk-go v1.0.115/go.mod h1:FBXrvPftVy+3kEwvTLuyOy3vQkDxX3Jwqt00zCCmcVQ=
 github.com/plan42-ai/sigv4util v1.0.4 h1:mR4vRjqexNLiz3njKlSVmu9FHA/UkSmRlpRQOER+dLY=
 github.com/plan42-ai/sigv4util v1.0.4/go.mod h1:y+mhSjI8kFxq2kwyW4JGabL0+OERePvUI4KkwyUGyLQ=
 github.com/plan42-ai/xml v1.25.5-2 h1:j02UzCrpkgMP86bWQsTjJidIJdQ3enioJ3JxL1vpRhE=
