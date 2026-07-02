@@ -62,6 +62,10 @@ type Poller struct {
 	connectionIdx          map[string]*config.GithubInfo
 	githubClients          map[string]*github.Client
 	githubClientMu         sync.Mutex
+	openAIEndpoint         string
+	openAIToken            string
+	claudeEndpoint         string
+	claudeToken            string
 }
 
 func (p *Poller) scale() {
@@ -684,6 +688,15 @@ func New(client *p42.Client, tenantID string, runnerID string, options ...Option
 func WithConnectionIdx(idx map[string]*config.GithubInfo) Option {
 	return func(p *Poller) {
 		p.connectionIdx = idx
+	}
+}
+
+func WithProviderConfig(openAIEndpoint, openAIToken, claudeEndpoint, claudeToken string) Option {
+	return func(p *Poller) {
+		p.openAIEndpoint = openAIEndpoint
+		p.openAIToken = openAIToken
+		p.claudeEndpoint = claudeEndpoint
+		p.claudeToken = claudeToken
 	}
 }
 
