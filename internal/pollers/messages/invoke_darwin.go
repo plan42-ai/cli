@@ -289,6 +289,7 @@ func (req *pollerInvokeAgentRequest) Init(p *Poller) {
 	req.PodmanPath = p.PodmanPath
 	req.Provider = p.Provider
 	req.client = p.client.WithAPIToken(req.AgentToken)
+	applyProviderConfig(req, p)
 	if req.PrivateGithubConnectionID != nil {
 		cnn := p.connectionIdx[*req.PrivateGithubConnectionID]
 		if cnn != nil {

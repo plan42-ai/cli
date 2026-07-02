@@ -27,6 +27,12 @@ type Options struct {
 func (o *Options) PollerOptions() []messages.Option {
 	ret := []messages.Option{
 		messages.WithConnectionIdx(o.ConnectionIdx),
+		messages.WithProviderConfig(
+			o.Config.Runner.OpenAIEndpoint,
+			o.Config.Runner.OpenAIToken,
+			o.Config.Runner.ClaudeEndpoint,
+			o.Config.Runner.ClaudeToken,
+		),
 	}
 	ret = o.PlatformOptions.PollerOptions(ret)
 	return ret
