@@ -66,6 +66,7 @@ type Poller struct {
 	openAIToken            string
 	claudeEndpoint         string
 	claudeToken            string
+	modelMappings          messages.ModelMappings
 }
 
 func (p *Poller) scale() {
@@ -691,12 +692,13 @@ func WithConnectionIdx(idx map[string]*config.GithubInfo) Option {
 	}
 }
 
-func WithProviderConfig(openAIEndpoint, openAIToken, claudeEndpoint, claudeToken string) Option {
+func WithProviderConfig(openAIEndpoint, openAIToken, claudeEndpoint, claudeToken string, modelMappings messages.ModelMappings) Option {
 	return func(p *Poller) {
 		p.openAIEndpoint = openAIEndpoint
 		p.openAIToken = openAIToken
 		p.claudeEndpoint = claudeEndpoint
 		p.claudeToken = claudeToken
+		p.modelMappings = modelMappings
 	}
 }
 
