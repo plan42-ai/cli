@@ -32,6 +32,7 @@ func (o *Options) PollerOptions() []messages.Option {
 			o.Config.Runner.OpenAIToken,
 			o.Config.Runner.ClaudeEndpoint,
 			o.Config.Runner.ClaudeToken,
+			o.Config.Runner.ModelMappings,
 		),
 	}
 	ret = o.PlatformOptions.PollerOptions(ret)

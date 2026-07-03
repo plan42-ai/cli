@@ -3,6 +3,8 @@ package messages
 import (
 	"testing"
 
+	"github.com/plan42-ai/sdk-go/p42"
+	sdkmessages "github.com/plan42-ai/sdk-go/p42/messages"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,6 +17,9 @@ func TestApplyProviderConfigSetsConfiguredOverrides(t *testing.T) {
 		openAIToken:    "openai-token",
 		claudeEndpoint: "https://claude.example.test",
 		claudeToken:    "claude-token",
+		modelMappings: sdkmessages.ModelMappings{
+			p42.ModelTypeGpt51Codex: {Provider: "openai", Model: "gpt-5.1-codex-custom"},
+		},
 	}
 
 	applyProviderConfig(req, p)
@@ -27,6 +32,7 @@ func TestApplyProviderConfigSetsConfiguredOverrides(t *testing.T) {
 	require.Equal(t, p.claudeEndpoint, *req.ClaudeEndpoint)
 	require.NotNil(t, req.ClaudeToken)
 	require.Equal(t, p.claudeToken, *req.ClaudeToken)
+	require.Equal(t, p.modelMappings, req.ModelMappings)
 }
 
 func TestApplyProviderConfigLeavesAbsentOverridesUnset(t *testing.T) {
@@ -39,4 +45,5 @@ func TestApplyProviderConfigLeavesAbsentOverridesUnset(t *testing.T) {
 	require.Nil(t, req.OpenAIToken)
 	require.Nil(t, req.ClaudeEndpoint)
 	require.Nil(t, req.ClaudeToken)
+	require.Nil(t, req.ModelMappings)
 }

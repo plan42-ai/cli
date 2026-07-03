@@ -25,4 +25,7 @@ func applyProviderConfig(req *pollerInvokeAgentRequest, p *Poller) {
 	if p.claudeToken != "" {
 		req.ClaudeToken = util.Pointer(p.claudeToken)
 	}
+	if len(p.modelMappings) > 0 {
+		req.ModelMappings = p.modelMappings
+	}
 }
