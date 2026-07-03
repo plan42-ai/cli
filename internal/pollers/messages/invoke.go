@@ -9,7 +9,8 @@ import (
 type pollerInvokeAgentRequest struct {
 	InvokePlatformFields
 	messages.InvokeAgentRequest
-	client *p42.Client
+	noWebSearch bool
+	client      *p42.Client
 }
 
 func applyProviderConfig(req *pollerInvokeAgentRequest, p *Poller) {
@@ -25,7 +26,20 @@ func applyProviderConfig(req *pollerInvokeAgentRequest, p *Poller) {
 	if p.claudeToken != "" {
 		req.ClaudeToken = util.Pointer(p.claudeToken)
 	}
+	req.noWebSearch = p.noWebSearch
 	if len(p.modelMappings) > 0 {
 		req.ModelMappings = p.modelMappings
 	}
+}
+
+func (req *pollerInvokeAgentRequest) agentArgs() []string {
+	args := []string{
+		"--encrypted-input=false",
+		"--plan42-proxy",
+		"--log-agent-output",
+	}
+	if req.noWebSearch {
+		args = append(args, "--no-websearch")
+	}
+	return args
 }

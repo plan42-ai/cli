@@ -6,6 +6,7 @@ type Runner struct {
 	URL            string                 `toml:"url"`
 	RunnerToken    string                 `toml:"token"`
 	SkipSSLVerify  bool                   `toml:"skip_ssl_verify,omitempty"`
+	NoWebSearch    bool                   `toml:"no_websearch,omitempty"`
 	Runtime        string                 `toml:"runtime"`
 	OpenAIEndpoint string                 `toml:"openai_endpoint,omitempty"`
 	OpenAIToken    string                 `toml:"openai_token,omitempty"`

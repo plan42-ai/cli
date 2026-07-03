@@ -166,18 +166,16 @@ func (req *pollerInvokeAgentRequest) runContainer(ctx context.Context, container
 		return
 	}
 
+	agentArgs := req.agentArgs()
+
 	err = req.Provider.RunJob(ctx, p42runtime.JobOptions{
 		JobID:      containerID,
 		Image:      req.Environment.DockerImage,
 		CPUs:       4,
 		MemoryInGB: 8,
 		Entrypoint: "/usr/bin/agent-wrapper",
-		Args: []string{
-			"--encrypted-input=false",
-			"--plan42-proxy",
-			"--log-agent-output",
-		},
-		Stdin: bytes.NewReader(jsonBytes),
+		Args:       agentArgs,
+		Stdin:      bytes.NewReader(jsonBytes),
 	})
 
 	if err != nil {
