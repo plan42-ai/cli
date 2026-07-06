@@ -29,3 +29,18 @@ extended_context = true
 	require.Equal(t, "gpt-5.1-codex-custom", cfg.Runner.ModelMappings[p42.ModelTypeGpt51Codex].Model)
 	require.True(t, cfg.Runner.ModelMappings[p42.ModelTypeGpt51Codex].ExtendedContext)
 }
+
+func TestConfigDecodesRunnerNoWebSearch(t *testing.T) {
+	t.Parallel()
+
+	var cfg Config
+	err := toml.NewDecoder(strings.NewReader(`
+	[runner]
+	url = "https://api.example.test"
+	token = "runner-token"
+	no_websearch = true
+	`)).Decode(&cfg)
+
+	require.NoError(t, err)
+	require.True(t, cfg.Runner.NoWebSearch)
+}
