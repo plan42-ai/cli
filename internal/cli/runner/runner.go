@@ -33,6 +33,7 @@ func (o *Options) PollerOptions() []messages.Option {
 			o.Config.Runner.ClaudeEndpoint,
 			o.Config.Runner.ClaudeToken,
 			o.Config.Runner.NoWebSearch,
+			o.Config.Runner.NoAnthropicCache,
 			o.Config.Runner.ModelMappings,
 		),
 	}

@@ -9,8 +9,9 @@ import (
 type pollerInvokeAgentRequest struct {
 	InvokePlatformFields
 	messages.InvokeAgentRequest
-	noWebSearch bool
-	client      *p42.Client
+	noWebSearch      bool
+	noAnthropicCache bool
+	client           *p42.Client
 }
 
 func applyProviderConfig(req *pollerInvokeAgentRequest, p *Poller) {
@@ -27,6 +28,7 @@ func applyProviderConfig(req *pollerInvokeAgentRequest, p *Poller) {
 		req.ClaudeToken = util.Pointer(p.claudeToken)
 	}
 	req.noWebSearch = p.noWebSearch
+	req.noAnthropicCache = p.noAnthropicCache
 	if len(p.modelMappings) > 0 {
 		req.ModelMappings = p.modelMappings
 	}
@@ -40,6 +42,9 @@ func (req *pollerInvokeAgentRequest) agentArgs() []string {
 	}
 	if req.noWebSearch {
 		args = append(args, "--no-websearch")
+	}
+	if req.noAnthropicCache {
+		args = append(args, "--no-anthropic-cache")
 	}
 	return args
 }

@@ -44,3 +44,18 @@ func TestConfigDecodesRunnerNoWebSearch(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, cfg.Runner.NoWebSearch)
 }
+
+func TestConfigDecodesRunnerNoAnthropicCache(t *testing.T) {
+	t.Parallel()
+
+	var cfg Config
+	err := toml.NewDecoder(strings.NewReader(`
+		[runner]
+		url = "https://api.example.test"
+		token = "runner-token"
+		no_anthropic_cache = true
+		`)).Decode(&cfg)
+
+	require.NoError(t, err)
+	require.True(t, cfg.Runner.NoAnthropicCache)
+}
