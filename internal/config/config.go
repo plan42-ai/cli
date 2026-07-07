@@ -3,17 +3,17 @@ package config
 import "github.com/plan42-ai/sdk-go/p42/messages"
 
 type Runner struct {
-	URL              string                 `toml:"url"`
-	RunnerToken      string                 `toml:"token"`
-	SkipSSLVerify    bool                   `toml:"skip_ssl_verify,omitempty"`
-	NoWebSearch      bool                   `toml:"no_websearch,omitempty"`
-	NoAnthropicCache bool                   `toml:"no_anthropic_cache,omitempty"`
-	Runtime          string                 `toml:"runtime"`
-	OpenAIEndpoint   string                 `toml:"openai_endpoint,omitempty"`
-	OpenAIToken      string                 `toml:"openai_token,omitempty"`
-	ClaudeEndpoint   string                 `toml:"claude_endpoint,omitempty"`
-	ClaudeToken      string                 `toml:"claude_token,omitempty"`
-	ModelMappings    messages.ModelMappings `toml:"model_mappings,omitempty"`
+	URL            string                 `toml:"url"`
+	RunnerToken    string                 `toml:"token"`
+	SkipSSLVerify  bool                   `toml:"skip_ssl_verify,omitempty"`
+	NoWebSearch    bool                   `toml:"no_websearch,omitempty"`
+	NoCacheTTL     bool                   `toml:"no_cache_ttl,omitempty"`
+	Runtime        string                 `toml:"runtime"`
+	OpenAIEndpoint string                 `toml:"openai_endpoint,omitempty"`
+	OpenAIToken    string                 `toml:"openai_token,omitempty"`
+	ClaudeEndpoint string                 `toml:"claude_endpoint,omitempty"`
+	ClaudeToken    string                 `toml:"claude_token,omitempty"`
+	ModelMappings  messages.ModelMappings `toml:"model_mappings,omitempty"`
 }
 
 type GithubInfo struct {
