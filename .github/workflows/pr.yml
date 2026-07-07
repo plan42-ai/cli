@@ -10,7 +10,7 @@ jobs:
       contents: read
     strategy:
       matrix:
-        os: [ ubuntu-latest, ubuntu-arm64, macos-26, macos-15-intel ]
+        os: [ ubuntu-latest, ubuntu-arm64, macos-26 ]
     runs-on: ${{ matrix.os}}
     steps:
     - uses: actions/checkout@v6
