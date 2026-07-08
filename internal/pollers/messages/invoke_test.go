@@ -18,7 +18,6 @@ func TestApplyProviderConfigSetsConfiguredOverrides(t *testing.T) {
 		claudeEndpoint: "https://claude.example.test",
 		claudeToken:    "claude-token",
 		noWebSearch:    true,
-		noCacheTTL:     true,
 		modelMappings: sdkmessages.ModelMappings{
 			p42.ModelTypeGpt51Codex: {Provider: "openai", Model: "gpt-5.1-codex-custom"},
 		},
@@ -35,7 +34,6 @@ func TestApplyProviderConfigSetsConfiguredOverrides(t *testing.T) {
 	require.NotNil(t, req.ClaudeToken)
 	require.Equal(t, p.claudeToken, *req.ClaudeToken)
 	require.True(t, req.noWebSearch)
-	require.True(t, req.noCacheTTL)
 	require.Equal(t, p.modelMappings, req.ModelMappings)
 }
 
@@ -50,7 +48,6 @@ func TestApplyProviderConfigLeavesAbsentOverridesUnset(t *testing.T) {
 	require.Nil(t, req.ClaudeEndpoint)
 	require.Nil(t, req.ClaudeToken)
 	require.False(t, req.noWebSearch)
-	require.False(t, req.noCacheTTL)
 	require.Nil(t, req.ModelMappings)
 }
 
@@ -69,11 +66,4 @@ func TestPollerInvokeAgentRequestAgentArgs(t *testing.T) {
 		"--log-agent-output",
 		"--no-websearch",
 	}, (&pollerInvokeAgentRequest{noWebSearch: true}).agentArgs())
-
-	require.Equal(t, []string{
-		"--encrypted-input=false",
-		"--plan42-proxy",
-		"--log-agent-output",
-		"--no-cache-ttl",
-	}, (&pollerInvokeAgentRequest{noCacheTTL: true}).agentArgs())
 }
