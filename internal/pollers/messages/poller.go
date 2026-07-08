@@ -67,7 +67,6 @@ type Poller struct {
 	claudeEndpoint         string
 	claudeToken            string
 	noWebSearch            bool
-	noCacheTTL             bool
 	modelMappings          messages.ModelMappings
 }
 
@@ -694,14 +693,13 @@ func WithConnectionIdx(idx map[string]*config.GithubInfo) Option {
 	}
 }
 
-func WithProviderConfig(openAIEndpoint, openAIToken, claudeEndpoint, claudeToken string, noWebSearch, noCacheTTL bool, modelMappings messages.ModelMappings) Option {
+func WithProviderConfig(openAIEndpoint, openAIToken, claudeEndpoint, claudeToken string, noWebSearch bool, modelMappings messages.ModelMappings) Option {
 	return func(p *Poller) {
 		p.openAIEndpoint = openAIEndpoint
 		p.openAIToken = openAIToken
 		p.claudeEndpoint = claudeEndpoint
 		p.claudeToken = claudeToken
 		p.noWebSearch = noWebSearch
-		p.noCacheTTL = noCacheTTL
 		p.modelMappings = modelMappings
 	}
 }

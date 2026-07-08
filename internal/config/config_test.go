@@ -44,18 +44,3 @@ func TestConfigDecodesRunnerNoWebSearch(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, cfg.Runner.NoWebSearch)
 }
-
-func TestConfigDecodesRunnerNoCacheTTL(t *testing.T) {
-	t.Parallel()
-
-	var cfg Config
-	err := toml.NewDecoder(strings.NewReader(`
-			[runner]
-			url = "https://api.example.test"
-			token = "runner-token"
-			no_cache_ttl = true
-			`)).Decode(&cfg)
-
-	require.NoError(t, err)
-	require.True(t, cfg.Runner.NoCacheTTL)
-}
