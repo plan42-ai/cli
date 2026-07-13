@@ -44,15 +44,8 @@ type Poller struct {
 	cg                     *concurrency.ContextGroup
 	ctx                    context.Context
 	queues                 []*queueInfo
-	nExpectedQueueCount    int64
-	nActualQueueCount      int64
-	lastScaleEvent         time.Time
-	sumBatchPct            float64
-	nBatches               int64
-	measureStart           time.Time
-	scaleTicker            *time.Ticker
-	scaleCtx               context.Context
-	cancelScale            context.CancelFunc
+	queueCount             int
+	shuttingDown           bool
 	mux                    sync.Mutex
 	client                 *p42.Client
 	tenantID               string
@@ -68,88 +61,6 @@ type Poller struct {
 	claudeToken            string
 	noWebSearch            bool
 	modelMappings          messages.ModelMappings
-}
-
-func (p *Poller) scale() {
-	defer p.cg.Done()
-	defer p.cancelScale()
-	defer p.scaleTicker.Stop()
-
-	for {
-		select {
-		case <-p.scaleCtx.Done():
-			return
-		case <-p.scaleTicker.C:
-		}
-
-		p.doScale()
-	}
-}
-
-func (p *Poller) doScale() {
-	p.mux.Lock()
-	defer p.mux.Unlock()
-	now := time.Now()
-
-	// We are still waiting for the last scale operation to complete, return.
-	if p.nExpectedQueueCount != p.nActualQueueCount {
-		return
-	}
-
-	// We don't have at least one minute of utilization data yet, return.
-	if now.Sub(p.measureStart) < time.Minute {
-		return
-	}
-
-	// If it's been less than one min since the last scale event, return.
-	if now.Sub(p.lastScaleEvent) < time.Minute {
-		return
-	}
-
-	// quick sanity check to avoid divide by 0.
-	if p.nBatches == 0 {
-		return
-	}
-
-	if p.sumBatchPct/float64(p.nBatches) >= 0.8 {
-		// It's been at least 1 min since the last scale operation
-		// and our average batch size is >= 80% full over at least 1 min. Double the number of queues.
-		p.scaleUp()
-		return
-	}
-
-	// We don't have at least 2 mins of measurement data, so we can't make any scale down decisions.
-	// return.
-	if now.Sub(p.measureStart) < time.Minute*2 {
-		return
-	}
-
-	// We can only scale down every 2 mins, so if it's been less than 2 mins since the last scale event,
-	// or we are still waiting on a scale down event, return.
-	if now.Sub(p.lastScaleEvent) < time.Minute*2 {
-		// reset our stats window
-		p.resetStats()
-		return
-	}
-
-	if p.sumBatchPct/float64(p.nBatches) <= 0.4 {
-		// It's been at least 2 mins since the last scale operation
-		// and our average batch size is <= 40% full over at least 2 mins.
-		// Decrease the number of queues by 1.
-		p.scaleDown()
-		return
-	}
-
-	// The average batch has been > 40% full and < 80% full for the last 2 mins.
-	// So, we are in a "good" steady state. No need to scale anything. Just
-	// reset our stat window.
-	p.resetStats()
-}
-
-func (p *Poller) resetStats() {
-	p.measureStart = time.Now()
-	p.nBatches = 0
-	p.sumBatchPct = 0.0
 }
 
 func createQueueInfo(ctx context.Context) *queueInfo {
@@ -170,44 +81,10 @@ func createQueueInfo(ctx context.Context) *queueInfo {
 	return qi
 }
 
-func (p *Poller) scaleUp() {
-	p.resetStats()
-
-	nToAdd := len(p.queues)
-	for i := 0; i < nToAdd; i++ {
-		qi := createQueueInfo(p.cg.Context())
-		if qi == nil {
-			continue
-		}
-		p.nExpectedQueueCount++
-		p.queues = append(p.queues, qi)
-		p.cg.Add(1)
-		go p.poll(qi)
-	}
-
-	if p.nExpectedQueueCount == p.nActualQueueCount {
-		p.lastScaleEvent = time.Now()
-	}
-}
-
-func (p *Poller) scaleDown() {
-	p.resetStats()
-	if len(p.queues) == 1 {
-		p.lastScaleEvent = time.Now()
-		return
-	}
-	p.nExpectedQueueCount--
-	last := p.queues[len(p.queues)-1]
-	p.queues[len(p.queues)-1] = nil
-	p.queues = p.queues[:len(p.queues)-1]
-	p.signalDrain(last)
-}
-
 func (p *Poller) drainAll() {
 	p.mux.Lock()
 	defer p.mux.Unlock()
-	p.resetStats()
-	p.nExpectedQueueCount = 0
+	p.shuttingDown = true
 	for _, qi := range p.queues {
 		p.signalDrain(qi)
 	}
@@ -219,7 +96,6 @@ func (p *Poller) poll(qi *queueInfo) {
 	defer qi.cancel()
 
 	err := p.createQueue(qi)
-	defer p.decreaseActualQueueCount()
 	if err != nil {
 		return
 	}
@@ -292,7 +168,6 @@ func (p *Poller) doPoll(qi *queueInfo, req *p42.GetMessagesBatchRequest) (n int,
 		p.batchBackoff.Recover()
 	}
 
-	p.addStats(float64(len(batch.Messages)) / 10.0)
 	for _, msg := range batch.Messages {
 		p.cg.Add(1)
 		go p.processMessage(msg, qi)
@@ -301,27 +176,7 @@ func (p *Poller) doPoll(qi *queueInfo, req *p42.GetMessagesBatchRequest) (n int,
 	return
 }
 
-func (p *Poller) decreaseActualQueueCount() {
-	p.mux.Lock()
-	defer p.mux.Unlock()
-	p.nActualQueueCount--
-	if p.nActualQueueCount == p.nExpectedQueueCount {
-		p.lastScaleEvent = time.Now()
-	}
-}
-
-func (p *Poller) increaseActualQueueCount() {
-	p.mux.Lock()
-	defer p.mux.Unlock()
-	p.nActualQueueCount++
-	if p.nActualQueueCount == p.nExpectedQueueCount {
-		p.lastScaleEvent = time.Now()
-	}
-}
-
 func (p *Poller) createQueue(qi *queueInfo) error {
-	defer p.increaseActualQueueCount()
-
 	for {
 		select {
 		case <-qi.ctx.Done():
@@ -369,20 +224,13 @@ func (p *Poller) createQueue(qi *queueInfo) error {
 	}
 }
 
-func (p *Poller) addStats(pct float64) {
-	p.mux.Lock()
-	defer p.mux.Unlock()
-	p.sumBatchPct += pct
-	p.nBatches++
-}
-
 func (p *Poller) handleQueueNotFound(qi *queueInfo) {
 	qi.skipDelete = true
 
 	p.mux.Lock()
 	defer p.mux.Unlock()
 
-	if qi.draining || qi.ctx.Err() != nil || p.nExpectedQueueCount == 0 {
+	if qi.draining || qi.ctx.Err() != nil || p.shuttingDown {
 		slog.InfoContext(qi.ctx, "queue removed during shutdown; skipping replacement", "queue", qi.queueID)
 		return
 	}
@@ -394,7 +242,6 @@ func (p *Poller) handleQueueNotFound(qi *queueInfo) {
 		return
 	}
 
-	p.nExpectedQueueCount--
 	p.queues = append(p.queues[:idx], p.queues[idx+1:]...)
 
 	replacement := createQueueInfo(p.cg.Context())
@@ -403,7 +250,6 @@ func (p *Poller) handleQueueNotFound(qi *queueInfo) {
 		return
 	}
 
-	p.nExpectedQueueCount++
 	p.queues = append(p.queues, replacement)
 	p.cg.Add(1)
 	go p.poll(replacement)
@@ -502,7 +348,6 @@ func (p *Poller) parseMessage(data []byte) (pollerMessage, error) {
 
 func (p *Poller) ShutdownContext(ctx context.Context) error {
 	p.drainAll()
-	p.cancelScale()
 	return p.cg.WaitContext(ctx)
 }
 
@@ -649,28 +494,11 @@ func New(client *p42.Client, tenantID string, runnerID string, options ...Option
 		slog.String("tenantID", tenantID),
 		slog.String("runnerID", runnerID),
 	)
-	qi := createQueueInfo(ctx)
-	if qi == nil {
-		panic("failed to create queue info")
-	}
-
-	scaleTicker := time.NewTicker(1 * time.Second)
-	scaleCtx, cancelScale := context.WithCancel(ctx)
 
 	ret := &Poller{
-		cg:  cg,
-		ctx: ctx,
-		queues: []*queueInfo{
-			qi,
-		},
-		nExpectedQueueCount:    1,
-		nActualQueueCount:      0,
-		sumBatchPct:            0,
-		nBatches:               0,
-		measureStart:           time.Now(),
-		scaleTicker:            scaleTicker,
-		scaleCtx:               scaleCtx,
-		cancelScale:            cancelScale,
+		cg:                     cg,
+		ctx:                    ctx,
+		queueCount:             1,
 		client:                 client,
 		tenantID:               tenantID,
 		runnerID:               runnerID,
@@ -681,10 +509,30 @@ func New(client *p42.Client, tenantID string, runnerID string, options ...Option
 	for _, opt := range options {
 		opt(ret)
 	}
-	ret.cg.Add(2)
-	go ret.scale()
-	go ret.poll(qi)
+
+	// queueCount is optional and defaults to a single queue.
+	if ret.queueCount < 1 {
+		ret.queueCount = 1
+	}
+
+	for i := 0; i < ret.queueCount; i++ {
+		qi := createQueueInfo(ret.cg.Context())
+		if qi == nil {
+			panic("failed to create queue info")
+		}
+		ret.queues = append(ret.queues, qi)
+		ret.cg.Add(1)
+		go ret.poll(qi)
+	}
 	return ret
+}
+
+// WithQueueCount sets the fixed number of queues the poller creates at startup.
+// Values less than one are treated as one.
+func WithQueueCount(count int) Option {
+	return func(p *Poller) {
+		p.queueCount = count
+	}
 }
 
 func WithConnectionIdx(idx map[string]*config.GithubInfo) Option {

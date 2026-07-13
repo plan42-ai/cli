@@ -8,6 +8,7 @@ type Runner struct {
 	SkipSSLVerify  bool                   `toml:"skip_ssl_verify,omitempty"`
 	NoWebSearch    bool                   `toml:"no_websearch,omitempty"`
 	Runtime        string                 `toml:"runtime"`
+	QueueCount     int                    `toml:"queue_count,omitempty"`
 	OpenAIEndpoint string                 `toml:"openai_endpoint,omitempty"`
 	OpenAIToken    string                 `toml:"openai_token,omitempty"`
 	ClaudeEndpoint string                 `toml:"claude_endpoint,omitempty"`

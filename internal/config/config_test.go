@@ -44,3 +44,32 @@ func TestConfigDecodesRunnerNoWebSearch(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, cfg.Runner.NoWebSearch)
 }
+
+func TestConfigDecodesRunnerQueueCount(t *testing.T) {
+	t.Parallel()
+
+	var cfg Config
+	err := toml.NewDecoder(strings.NewReader(`
+	[runner]
+	url = "https://api.example.test"
+	token = "runner-token"
+	queue_count = 4
+	`)).Decode(&cfg)
+
+	require.NoError(t, err)
+	require.Equal(t, 4, cfg.Runner.QueueCount)
+}
+
+func TestConfigQueueCountDefaultsToZeroWhenAbsent(t *testing.T) {
+	t.Parallel()
+
+	var cfg Config
+	err := toml.NewDecoder(strings.NewReader(`
+	[runner]
+	url = "https://api.example.test"
+	token = "runner-token"
+	`)).Decode(&cfg)
+
+	require.NoError(t, err)
+	require.Equal(t, 0, cfg.Runner.QueueCount)
+}
